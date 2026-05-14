@@ -1,1 +1,1 @@
-# mcp_servers package
+"""MCP servers package."""

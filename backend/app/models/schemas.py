@@ -156,7 +156,15 @@ class ActionCard(BaseModel):
 
 
 class ActionApprovalRequest(BaseModel):
-    action: str  # "approve" | "reject"
+    action: str  
+
+
+class ActionEditRequest(BaseModel):
+    action_type: Optional[str] = None
+    title: Optional[str] = None
+    reason: Optional[str] = None
+    expected_impact: Optional[str] = None
+    risk_level: Optional[RiskLevel] = None
 
 
 # Fix forward references
