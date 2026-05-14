@@ -1,0 +1,35 @@
+review_id,sku,rating,comment,date
+REV-001,SKU-TSHIRT-001,2,Bedeni çok küçük geldi. Bir beden büyük alınmalı.,2026-04-05
+REV-002,SKU-TSHIRT-001,1,Beden tablosu yok. S aldım ama XS gibi oldu.,2026-04-06
+REV-003,SKU-TSHIRT-001,3,Kumaş fena değil ama bedeni küçük kalıyor.,2026-04-08
+REV-004,SKU-TSHIRT-001,2,Görseldeki gibi değil rengi. Daha soluk.,2026-04-09
+REV-005,SKU-TSHIRT-001,1,Beklediğimden çok küçük geldi. İade ettim.,2026-04-10
+REV-006,SKU-TSHIRT-001,4,Güzel ürün ama bir beden büyük almak lazım.,2026-04-11
+REV-007,SKU-TSHIRT-001,2,Kumaşı çok ince. Yazlık bile olmaz.,2026-04-13
+REV-008,SKU-TSHIRT-001,1,Beden tablosu olmadan sipariş verdim hata ettim.,2026-04-14
+REV-009,SKU-TSHIRT-001,3,Kesimi güzel ama renk görseldeki gibi değil.,2026-04-16
+REV-010,SKU-TSHIRT-001,2,Bedeni küçük. Açıklamada beden bilgisi yok.,2026-04-17
+REV-011,SKU-TSHIRT-001,5,Çok beğendim. Normal bedenim tam oturdu.,2026-04-18
+REV-012,SKU-TSHIRT-001,2,Küçük geldi yine. Bu markanın bedenleri hep küçük.,2026-04-20
+REV-013,SKU-TSHIRT-001,1,İade ediyorum. Beden uyumsuz.,2026-04-22
+REV-014,SKU-TSHIRT-001,3,Kumaş kalitesi idare eder. Beden tablosu ekleyin lütfen.,2026-04-24
+REV-015,SKU-TSHIRT-001,2,Renk fotoğraftakinden farklı geldi.,2026-04-26
+REV-016,SKU-TSHIRT-001,4,Oversize olduğu için rahat. Ben beğendim.,2026-04-28
+REV-017,SKU-TSHIRT-001,1,Paketleme kötüydü. Ürün buruşuk geldi.,2026-04-29
+REV-100,SKU-JEAN-002,5,Harika kalıp. Tam beden.,2026-04-04
+REV-101,SKU-JEAN-002,4,Kumaş kalitesi iyi. Esnek yapısı güzel.,2026-04-10
+REV-102,SKU-JEAN-002,3,Fiyatına göre iyi ama dikiş kalitesi orta.,2026-04-15
+REV-103,SKU-JEAN-002,4,Beden tam oturdu. Memnunum.,2026-04-22
+REV-104,SKU-JEAN-002,2,Kumaş birkaç yıkamada solmaya başladı.,2026-04-28
+REV-200,SKU-SNEAKER-003,4,Hafif ve rahat. Günlük kullanım için ideal.,2026-04-05
+REV-201,SKU-SNEAKER-003,3,Numara biraz büyük geldi.,2026-04-12
+REV-202,SKU-SNEAKER-003,5,Çok beğendim. Kaliteli görünüyor.,2026-04-18
+REV-203,SKU-SNEAKER-003,2,Taban çok sert. Uzun yürüyüşte ayak ağrıyor.,2026-04-25
+REV-300,SKU-BAG-004,5,Çok şık. Fiyatına göre kaliteli.,2026-04-04
+REV-301,SKU-BAG-004,4,Boyutu tam istediğim gibi.,2026-04-10
+REV-302,SKU-BAG-004,5,Rengi çok güzel. Herkese tavsiye ederim.,2026-04-18
+REV-303,SKU-BAG-004,3,Askısı biraz kısa kalmış.,2026-04-25
+REV-400,SKU-WATCH-005,4,Tasarımı güzel. LED ekranı parlak.,2026-04-08
+REV-401,SKU-WATCH-005,5,Su geçirmez özelliği gerçekten çalışıyor.,2026-04-15
+REV-402,SKU-WATCH-005,3,Kayış kalitesi orta ama fiyatına göre iyi.,2026-04-22
+REV-403,SKU-WATCH-005,4,Spor yaparken çok kullanışlı.,2026-04-29

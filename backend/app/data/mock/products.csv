@@ -1,0 +1,6 @@
+sku,name,category,current_price,unit_cost,stock_quantity,description
+SKU-TSHIRT-001,Kadın Oversize Basic Tişört,Giyim,399,187,240,"Rahat kesim oversize tişört. %100 pamuk."
+SKU-JEAN-002,Erkek Slim Fit Jean,Giyim,549,220,85,"Slim fit erkek jean pantolon. Esnek kumaş."
+SKU-SNEAKER-003,Unisex Günlük Sneaker,Ayakkabı,699,310,120,"Hafif taban, günlük kullanım sneaker."
+SKU-BAG-004,Kadın Çapraz Askılı Çanta,Aksesuar,299,95,300,"Kompakt boyut, ayarlanabilir askı."
+SKU-WATCH-005,Erkek Dijital Kol Saati,Aksesuar,459,140,60,"Su geçirmez, LED ekran, spor tasarım."
