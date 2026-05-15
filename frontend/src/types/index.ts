@@ -28,10 +28,13 @@ export interface SKUProfitability {
   sku: string;
   product_name: string;
   category: string;
+  order_count: number;
   quantity_sold: number;
   gross_revenue: number;
   cogs: number;
   commission_cost: number;
+  platform_fee: number;
+  transaction_fee: number;
   shipping_cost: number;
   ad_spend: number;
   return_count: number;
@@ -48,6 +51,8 @@ export interface SKUProfitability {
 export interface DashboardKPIs {
   total_revenue: number;
   total_net_profit: number;
+  total_platform_fees: number;
+  total_transaction_fees: number;
   average_margin: number;
   total_orders: number;
   total_returns: number;
@@ -78,6 +83,7 @@ export interface RootCauseAnalysis {
   main_cause: string;
   explanation: string;
   evidence: EvidenceItem[];
+  main_cause_supporting_refs: string[];
   review_problems: string[];
   return_reasons: Record<string, number>;
   description_gaps: string[];
@@ -115,4 +121,12 @@ export interface ActionCard {
   expected_impact: string;
   risk_level: RiskLevel;
   status: ActionStatus;
+}
+
+export interface ActionEditRequest {
+  action_type?: string;
+  title?: string;
+  reason?: string;
+  expected_impact?: string;
+  risk_level?: RiskLevel;
 }

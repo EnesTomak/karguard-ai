@@ -6,15 +6,19 @@ This is a deliberate architectural decision for accuracy and auditability.
 
 from __future__ import annotations
 
+import logging
 import pandas as pd
 from pathlib import Path
 
+from app.config import settings
 from app.models.schemas import (
     SKUProfitability,
     DashboardKPIs,
     DashboardResponse,
     RiskLevel,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FinanceEngine:
@@ -54,10 +58,13 @@ class FinanceEngine:
         def read(name: str) -> pd.DataFrame:
             csv = run_dir / f"{name}.csv"
             xlsx = run_dir / f"{name}.xlsx"
+            xls = run_dir / f"{name}.xls"
             if csv.exists():
                 return pd.read_csv(csv)
             elif xlsx.exists():
                 return pd.read_excel(xlsx)
+            elif xls.exists():
+                return pd.read_excel(xls)
             return pd.DataFrame()
 
         self.orders = read("orders")
@@ -73,23 +80,71 @@ class FinanceEngine:
 
         # Merge product info
         orders = self.orders.copy()
+        if "quantity" in orders.columns:
+            raw_quantity = orders["quantity"]
+        else:
+            raw_quantity = pd.Series(0, index=orders.index, dtype="float64")
+
+        if "unit_price" in orders.columns:
+            raw_unit_price = orders["unit_price"]
+        else:
+            raw_unit_price = pd.Series(0.0, index=orders.index, dtype="float64")
+
+        orders["quantity"] = pd.to_numeric(raw_quantity, errors="coerce").fillna(0)
+        orders["unit_price"] = pd.to_numeric(raw_unit_price, errors="coerce").fillna(0.0)
+        orders["quantity"] = orders["quantity"].clip(lower=0)
+        orders["unit_price"] = orders["unit_price"].clip(lower=0)
+        if "order_id" in orders.columns:
+            orders["order_key"] = orders["order_id"].astype(str)
+            order_count_agg: tuple[str, str] = ("order_key", "nunique")
+        else:
+            # Fallback when order id is missing: treat each row as one order event.
+            orders["order_key"] = orders.index.astype(str)
+            order_count_agg = ("order_key", "count")
 
         # Revenue per SKU
         sku_revenue = orders.groupby("sku").agg(
+            order_count=order_count_agg,
             quantity_sold=("quantity", "sum"),
             gross_revenue=("unit_price", lambda x: (x * orders.loc[x.index, "quantity"]).sum()),
         ).reset_index()
 
         # Commission per SKU
         if "commission_rate" in orders.columns:
+            orders["commission_rate"] = pd.to_numeric(orders["commission_rate"], errors="coerce").fillna(0.0)
             orders["commission_cost"] = orders["unit_price"] * orders["quantity"] * orders["commission_rate"]
             sku_commission = orders.groupby("sku")["commission_cost"].sum().reset_index()
             sku_revenue = sku_revenue.merge(sku_commission, on="sku", how="left")
         else:
             sku_revenue["commission_cost"] = 0.0
 
+        # Platform fee per SKU
+        if "platform_fee" in orders.columns:
+            orders["platform_fee"] = pd.to_numeric(orders["platform_fee"], errors="coerce").fillna(0.0)
+            sku_platform_fee = orders.groupby("sku")["platform_fee"].sum().reset_index()
+            sku_revenue = sku_revenue.merge(sku_platform_fee, on="sku", how="left")
+        elif "platform_fee_rate" in orders.columns:
+            orders["platform_fee_rate"] = pd.to_numeric(orders["platform_fee_rate"], errors="coerce").fillna(0.0)
+            orders["platform_fee"] = orders["unit_price"] * orders["quantity"] * orders["platform_fee_rate"]
+            sku_platform_fee = orders.groupby("sku")["platform_fee"].sum().reset_index()
+            sku_revenue = sku_revenue.merge(sku_platform_fee, on="sku", how="left")
+        else:
+            sku_revenue["platform_fee"] = 0.0
+
+        # Transaction fee per SKU
+        if "transaction_fee" in orders.columns:
+            orders["transaction_fee"] = pd.to_numeric(orders["transaction_fee"], errors="coerce").fillna(0.0)
+            sku_transaction_fee = orders.groupby("sku")["transaction_fee"].sum().reset_index()
+            sku_revenue = sku_revenue.merge(sku_transaction_fee, on="sku", how="left")
+        else:
+            # Default platform transaction fee on each order row
+            orders["transaction_fee"] = settings.TRANSACTION_FEE_PER_ORDER
+            sku_transaction_fee = orders.groupby("sku")["transaction_fee"].sum().reset_index()
+            sku_revenue = sku_revenue.merge(sku_transaction_fee, on="sku", how="left")
+
         # Shipping per SKU
         if "cargo_cost" in orders.columns:
+            orders["cargo_cost"] = pd.to_numeric(orders["cargo_cost"], errors="coerce").fillna(0.0)
             sku_shipping = orders.groupby("sku")["cargo_cost"].sum().reset_index(name="shipping_cost")
             sku_revenue = sku_revenue.merge(sku_shipping, on="sku", how="left")
         else:
@@ -97,7 +152,13 @@ class FinanceEngine:
 
         # Ad spend per SKU
         if not self.ads.empty and "sku" in self.ads.columns:
-            sku_ads = self.ads.groupby("sku")["spend"].sum().reset_index()
+            ads = self.ads.copy()
+            if "spend" in ads.columns:
+                raw_spend = ads["spend"]
+            else:
+                raw_spend = pd.Series(0.0, index=ads.index, dtype="float64")
+            ads["spend"] = pd.to_numeric(raw_spend, errors="coerce").fillna(0.0)
+            sku_ads = ads.groupby("sku")["spend"].sum().reset_index()
             sku_ads.columns = ["sku", "ad_spend"]
             sku_revenue = sku_revenue.merge(sku_ads, on="sku", how="left")
         else:
@@ -105,10 +166,39 @@ class FinanceEngine:
 
         # Returns per SKU
         if not self.returns.empty and "sku" in self.returns.columns:
-            sku_returns = self.returns.groupby("sku").agg(
-                return_count=("return_id", "count"),
-                refund_amount=("refund_amount", "sum") if "refund_amount" in self.returns.columns else ("return_id", "count"),
-                return_shipping_cost=("return_shipping_cost", "sum") if "return_shipping_cost" in self.returns.columns else ("return_id", lambda x: 0),
+            returns = self.returns.copy()
+            return_count_col = "return_id" if "return_id" in returns.columns else "sku"
+            returns["return_count"] = 1
+
+            if "refund_amount" in returns.columns:
+                returns["refund_amount"] = pd.to_numeric(returns["refund_amount"], errors="coerce").fillna(0.0)
+            elif "order_id" in returns.columns and "order_id" in orders.columns:
+                order_amount_map = (
+                    (orders["unit_price"] * orders["quantity"])
+                    .groupby(orders["order_id"])
+                    .sum()
+                )
+                returns["refund_amount"] = (
+                    returns["order_id"].map(order_amount_map).fillna(0.0)
+                )
+            else:
+                logger.warning(
+                    "returns dataset has no refund_amount/order_id mapping; "
+                    "refund_amount defaults to 0.0"
+                )
+                returns["refund_amount"] = 0.0
+
+            if "return_shipping_cost" in returns.columns:
+                returns["return_shipping_cost"] = pd.to_numeric(
+                    returns["return_shipping_cost"], errors="coerce"
+                ).fillna(0.0)
+            else:
+                returns["return_shipping_cost"] = 0.0
+
+            sku_returns = returns.groupby("sku").agg(
+                return_count=(return_count_col, "count"),
+                refund_amount=("refund_amount", "sum"),
+                return_shipping_cost=("return_shipping_cost", "sum"),
             ).reset_index()
             sku_revenue = sku_revenue.merge(sku_returns, on="sku", how="left")
         else:
@@ -142,6 +232,8 @@ class FinanceEngine:
             sku_revenue["gross_revenue"]
             - sku_revenue["cogs"]
             - sku_revenue["commission_cost"]
+            - sku_revenue["platform_fee"]
+            - sku_revenue["transaction_fee"]
             - sku_revenue["shipping_cost"]
             - sku_revenue["ad_spend"]
             - sku_revenue["refund_amount"]
@@ -178,10 +270,13 @@ class FinanceEngine:
                 sku=row["sku"],
                 product_name=row.get("name", row["sku"]),
                 category=row.get("category", ""),
+                order_count=int(row.get("order_count", 0)),
                 quantity_sold=int(row["quantity_sold"]),
                 gross_revenue=round(row["gross_revenue"], 2),
                 cogs=round(row["cogs"], 2),
                 commission_cost=round(row["commission_cost"], 2),
+                platform_fee=round(row["platform_fee"], 2),
+                transaction_fee=round(row["transaction_fee"], 2),
                 shipping_cost=round(row["shipping_cost"], 2),
                 ad_spend=round(row["ad_spend"], 2),
                 return_count=int(row["return_count"]),
@@ -197,28 +292,27 @@ class FinanceEngine:
 
     def _calculate_risk_scores(self, df: pd.DataFrame) -> pd.Series:
         """Weighted risk score: 0-100. Higher = worse."""
+        # Absolute risk components (not cohort-normalized) so equal-loss cohorts
+        # still receive meaningful risk scores.
+        safe_revenue = df["gross_revenue"].replace(0, 1.0)
+        loss_ratio_pct = ((-df["net_profit"]).clip(lower=0) / safe_revenue) * 100
+        profit_score = loss_ratio_pct.clip(0, 100)
+        return_score = df["return_rate"].clip(0, 100)
+        ad_score = df["ad_to_revenue_ratio"].clip(0, 100)
 
-        def normalize(series: pd.Series) -> pd.Series:
-            mn, mx = series.min(), series.max()
-            if mx == mn:
-                return pd.Series(0, index=series.index)
-            return ((series - mn) / (mx - mn)) * 100
-
-        # Negative profit score (more negative = higher risk)
-        # -net_profit turns losses into positive values, clip(lower=0) ignores profitable SKUs
-        profit_score = normalize((-df["net_profit"]).clip(lower=0))
-
-        # Return rate
-        return_score = normalize(df["return_rate"])
-
-        # Ad to revenue
-        ad_score = normalize(df["ad_to_revenue_ratio"])
-        # Composite
+        weight_profit = 0.40
+        weight_return = 0.35
+        weight_ad = 0.25
+        total_weight = weight_profit + weight_return + weight_ad
         risk = (
-            profit_score * 0.40
-            + return_score * 0.30
-            + ad_score * 0.20
-        )
+            profit_score * weight_profit
+            + return_score * weight_return
+            + ad_score * weight_ad
+        ) / total_weight
+
+        # Any loss-making SKU should not appear as low-risk, even in homogeneous cohorts.
+        loss_floor = 30.0
+        risk = risk.where(df["net_profit"] >= 0, risk.clip(lower=loss_floor))
 
         # Ensure 0-100
         return risk.clip(0, 100)
@@ -232,6 +326,8 @@ class FinanceEngine:
 
         total_revenue = sum(p.gross_revenue for p in products)
         total_profit = sum(p.net_profit for p in products)
+        total_platform_fees = sum(p.platform_fee for p in products)
+        total_transaction_fees = sum(p.transaction_fee for p in products)
         total_orders = sum(p.quantity_sold for p in products)
         total_returns = sum(p.return_count for p in products)
         total_ad = sum(p.ad_spend for p in products)
@@ -242,6 +338,8 @@ class FinanceEngine:
         self.kpis = DashboardKPIs(
             total_revenue=round(total_revenue, 2),
             total_net_profit=round(total_profit, 2),
+            total_platform_fees=round(total_platform_fees, 2),
+            total_transaction_fees=round(total_transaction_fees, 2),
             average_margin=round(total_profit / total_revenue * 100, 2) if total_revenue > 0 else 0,
             total_orders=total_orders,
             total_returns=total_returns,
@@ -261,7 +359,14 @@ class FinanceEngine:
         # Rough daily estimates from totals
         total_revenue = sum(p.gross_revenue for p in products)
         total_costs = sum(
-            p.cogs + p.commission_cost + p.shipping_cost + p.ad_spend + p.refund_amount
+            p.cogs
+            + p.commission_cost
+            + p.platform_fee
+            + p.transaction_fee
+            + p.shipping_cost
+            + p.ad_spend
+            + p.refund_amount
+            + p.return_shipping_cost
             for p in products
         )
 

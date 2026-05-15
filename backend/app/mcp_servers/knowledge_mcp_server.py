@@ -60,10 +60,10 @@ def search_reviews_by_sku(
     index_result = _ensure_index(run_id)
     warning = ""
     try:
-        items = rag_search_reviews_by_sku(sku=sku, query=query, top_k=top_k)
+        items = rag_search_reviews_by_sku(run_id=run_id, sku=sku, query=query, top_k=top_k)
     except Exception as exc:
         warning = f"Semantic search failed; fallback used: {exc}"
-        items = rag_search_reviews_by_sku(sku=sku, query=None, top_k=top_k)
+        items = rag_search_reviews_by_sku(run_id=run_id, sku=sku, query=None, top_k=top_k)
     return {
         "run_id": run_id,
         "sku": sku,
@@ -78,13 +78,14 @@ def search_reviews_by_sku(
 def search_product_description(
     run_id: str,
     query: str,
+    sku: str | None = None,
     top_k: int = 3,
 ) -> dict[str, Any]:
     """Search product descriptions by semantic similarity."""
     index_result = _ensure_index(run_id)
     warning = ""
     try:
-        items = rag_search_product_description(query=query, top_k=top_k)
+        items = rag_search_product_description(run_id=run_id, query=query, sku=sku, top_k=top_k)
     except Exception as exc:
         warning = f"Semantic search failed: {exc}"
         items = []
@@ -109,6 +110,7 @@ def retrieve_root_cause_evidence(
     """Retrieve RAG evidence from reviews, product descriptions, and policies."""
     index_result = _ensure_index(run_id)
     evidence = rag_retrieve_root_cause_evidence(
+        run_id=run_id,
         sku=sku,
         financial_summary=financial_summary,
         top_k_reviews=top_k_reviews,
@@ -152,6 +154,7 @@ def generate_evidence_summary(
     """Generate a short summary from retrieved RAG evidence."""
     index_result = _ensure_index(run_id)
     evidence = rag_retrieve_root_cause_evidence(
+        run_id=run_id,
         sku=sku,
         financial_summary=financial_summary,
         top_k_reviews=top_k_reviews,

@@ -11,12 +11,12 @@ from app.models.schemas import UploadResponse
 
 router = APIRouter()
 
-ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls", ".md", ".txt"}
+ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 
 @router.post("/upload", response_model=UploadResponse)
 async def upload_files(files: list[UploadFile] = File(...)):
-    """Upload CSV/Excel/Markdown files for a new analysis run."""
+    """Upload CSV/Excel files for a new analysis run."""
     run_id = str(uuid.uuid4())[:8]
     run_dir = settings.UPLOAD_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)

@@ -13,10 +13,14 @@ import {
   ShieldCheck,
   TrendingDown,
 } from "lucide-react";
-import { uploadFiles, startAnalysis } from "../lib/api";
+import { uploadFiles, startAnalysis, getAnalysisStatus } from "../lib/api";
 import type { AgentStep } from "../types";
 
-const ACCEPTED = ".csv,.xlsx,.xls,.md,.txt";
+const ACCEPTED = ".csv,.xlsx,.xls";
+const REQUIRED_DATASETS = ["orders", "returns", "products", "ads", "reviews"] as const;
+const POLL_INTERVAL_MS = 1500;
+const MAX_POLL_ATTEMPTS = 400;
+const MAX_TRANSIENT_POLL_ERRORS = 5;
 
 export default function UploadPage() {
   const navigate = useNavigate();
@@ -26,6 +30,8 @@ export default function UploadPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
   const [error, setError] = useState("");
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   /* ── Drag & Drop ─────────────────────────────────── */
 
@@ -46,10 +52,27 @@ export default function UploadPage() {
     setFiles((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const normalizeDatasetName = (fileName: string): string => {
+    const dot = fileName.lastIndexOf(".");
+    const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+    return base.trim().toLowerCase();
+  };
+
   /* ── Upload & Analyze ────────────────────────────── */
 
   const handleStart = async () => {
     if (files.length === 0) return;
+
+    const uploadedDatasetNames = new Set(files.map((f) => normalizeDatasetName(f.name)));
+    const missing = REQUIRED_DATASETS.filter((name) => !uploadedDatasetNames.has(name));
+    if (missing.length > 0) {
+      setError(
+        `Demo icin zorunlu dosyalar eksik: ${missing.join(", ")}. ` +
+        "Beklenen: orders, returns, products, ads, reviews."
+      );
+      return;
+    }
+
     setError("");
     setUploading(true);
 
@@ -58,16 +81,41 @@ export default function UploadPage() {
       setUploading(false);
       setAnalyzing(true);
 
-      const analysisRes = await startAnalysis(uploadRes.run_id);
+      let analysisRes = await startAnalysis(uploadRes.run_id);
+      setAgentSteps(analysisRes.agent_steps || []);
 
-      // Progressive step reveal for visual feedback
-      for (let i = 0; i < analysisRes.agent_steps.length; i++) {
-        setAgentSteps(analysisRes.agent_steps.slice(0, i + 1));
-        await new Promise((r) => setTimeout(r, 400));
+      let guard = 0;
+      let transientPollErrors = 0;
+      while (analysisRes.status === "running" || analysisRes.status === "pending") {
+        await sleep(POLL_INTERVAL_MS);
+        try {
+          analysisRes = await getAnalysisStatus(uploadRes.run_id);
+          setAgentSteps(analysisRes.agent_steps || []);
+          transientPollErrors = 0;
+        } catch (pollErr: any) {
+          transientPollErrors += 1;
+          if (transientPollErrors >= MAX_TRANSIENT_POLL_ERRORS) {
+            throw new Error(
+              pollErr?.response?.data?.detail ||
+              "Analiz durumu alinamiiyor. Lutfen tekrar deneyin."
+            );
+          }
+          continue;
+        }
+        guard += 1;
+        if (guard > MAX_POLL_ATTEMPTS) {
+          throw new Error(
+            "Analiz bekleme suresi asildi. Dashboard ekranindan durumu kontrol edebilirsiniz."
+          );
+        }
       }
 
-      // Brief pause to show completed state
-      await new Promise((r) => setTimeout(r, 600));
+      if (analysisRes.status !== "completed") {
+        const steps = analysisRes.agent_steps || [];
+        const lastStep = steps.length > 0 ? steps[steps.length - 1] : undefined;
+        throw new Error(lastStep?.message || "Analiz basarisiz oldu.");
+      }
+
       navigate(`/dashboard/${uploadRes.run_id}`);
     } catch (err: any) {
       setUploading(false);

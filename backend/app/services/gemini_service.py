@@ -15,6 +15,7 @@ from typing import Any
 
 from google import genai
 from google.genai import types
+from pydantic import ValidationError
 
 from app.config import settings
 
@@ -22,8 +23,26 @@ logger = logging.getLogger(__name__)
 
 _client: genai.Client | None = None
 
-MAX_RETRIES = 3
-BASE_DELAY = 5  # seconds
+def _extract_json_payload(text: str) -> dict[str, Any]:
+    """Parse structured output robustly even if extra text leaks in."""
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError as exc:
+            raise ValueError("Structured response is not valid JSON.") from exc
+
+    raise ValueError("Structured response does not include a JSON object.")
 
 
 def get_client() -> genai.Client:
@@ -38,23 +57,41 @@ def get_client() -> genai.Client:
 
 async def _call_with_retry(fn, *args, **kwargs):
     """Call Gemini API with exponential backoff on rate-limit errors."""
-    for attempt in range(MAX_RETRIES):
+    max_retries = max(0, settings.GEMINI_MAX_RETRIES)
+    base_delay = max(1, settings.GEMINI_BASE_DELAY_SECONDS)
+    timeout_seconds = max(5, settings.GEMINI_CALL_TIMEOUT_SECONDS)
+    for attempt in range(max_retries):
         try:
-            return fn(*args, **kwargs)
+            return await asyncio.wait_for(
+                asyncio.to_thread(fn, *args, **kwargs),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "Gemini call timed out. Retrying in %ss (attempt %s/%s).",
+                delay,
+                attempt + 1,
+                max_retries + 1,
+            )
+            await asyncio.sleep(delay)
         except Exception as exc:
             error_str = str(exc)
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                delay = BASE_DELAY * (2 ** attempt)
+                delay = base_delay * (2 ** attempt)
                 logger.warning(
                     "Rate limit hit. Retrying in %ss (attempt %s/%s).",
                     delay,
                     attempt + 1,
-                    MAX_RETRIES,
+                    max_retries + 1,
                 )
                 await asyncio.sleep(delay)
             else:
                 raise
-    return fn(*args, **kwargs)
+    return await asyncio.wait_for(
+        asyncio.to_thread(fn, *args, **kwargs),
+        timeout=timeout_seconds,
+    )
 
 
 async def generate_structured(
@@ -82,9 +119,22 @@ async def generate_structured(
     )
 
     if not response.text:
-        logger.error("Gemini returned an empty structured response.")
-        return {}
-    return json.loads(response.text)
+        raise RuntimeError("Gemini returned an empty structured response.")
+
+    payload = _extract_json_payload(response.text)
+
+    # Enforce schema validation to prevent silent contract drift.
+    if hasattr(response_schema, "model_validate"):
+        try:
+            validated = response_schema.model_validate(payload)
+            if hasattr(validated, "model_dump"):
+                return validated.model_dump()
+            return payload
+        except ValidationError as exc:
+            logger.error("Gemini structured output failed schema validation: %s", exc)
+            raise
+
+    return payload
 
 
 async def generate_text(

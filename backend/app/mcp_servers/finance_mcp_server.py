@@ -136,6 +136,8 @@ def calculate_risk_score(run_id: str, sku: str) -> dict[str, Any]:
         "risk_score": product.risk_score,
         "risk_level": product.risk_level.value,
         "net_profit": product.net_profit,
+        "platform_fee": product.platform_fee,
+        "transaction_fee": product.transaction_fee,
         "return_rate": product.return_rate,
         "ad_to_revenue_ratio": product.ad_to_revenue_ratio,
     }

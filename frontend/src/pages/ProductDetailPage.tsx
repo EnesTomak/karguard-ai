@@ -21,9 +21,19 @@ import {
   MessageSquareWarning,
   ListChecks,
   Sparkles,
+  Pencil,
+  Save,
+  X,
 } from "lucide-react";
-import { getProductDetail, runSimulation, approveAction, rejectAction } from "../lib/api";
-import type { SKUProfitability, SimulationResult, ActionCard, RootCauseAnalysis } from "../types";
+import { getProductDetail, runSimulation, approveAction, rejectAction, editAction } from "../lib/api";
+import type {
+  SKUProfitability,
+  SimulationResult,
+  ActionCard,
+  RootCauseAnalysis,
+  ActionEditRequest,
+  RiskLevel,
+} from "../types";
 
 function fmt(n: number): string {
   return new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(n);
@@ -43,6 +53,12 @@ export default function ProductDetailPage() {
   const [error, setError] = useState("");
   const [simError, setSimError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [editingActionId, setEditingActionId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editReason, setEditReason] = useState("");
+  const [editImpact, setEditImpact] = useState("");
+  const [editRisk, setEditRisk] = useState<RiskLevel>("low");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   /* ── Simulation Form ─────────────────────────────── */
   const [simPrice, setSimPrice] = useState<string>("");
@@ -101,6 +117,42 @@ export default function ProductDetailPage() {
       setActions((prev) => prev.map((a) => (a.action_id === id ? updated : a)));
     } catch (err: any) {
       setActionError(err.response?.data?.detail || "Aksiyon reddedilemedi.");
+    }
+  };
+
+  const startEditing = (action: ActionCard) => {
+    setEditingActionId(action.action_id);
+    setEditTitle(action.title);
+    setEditReason(action.reason);
+    setEditImpact(action.expected_impact || "");
+    setEditRisk(action.risk_level);
+  };
+
+  const cancelEditing = () => {
+    setEditingActionId(null);
+    setEditTitle("");
+    setEditReason("");
+    setEditImpact("");
+    setEditRisk("low");
+  };
+
+  const handleActionEdit = async (id: string) => {
+    setActionError("");
+    setSavingEdit(true);
+    try {
+      const payload: ActionEditRequest = {
+        title: editTitle.trim(),
+        reason: editReason.trim(),
+        expected_impact: editImpact.trim(),
+        risk_level: editRisk,
+      };
+      const updated = await editAction(id, payload);
+      setActions((prev) => prev.map((a) => (a.action_id === id ? updated : a)));
+      cancelEditing();
+    } catch (err: any) {
+      setActionError(err.response?.data?.detail || "Aksiyon duzenlenemedi.");
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -175,6 +227,8 @@ export default function ProductDetailPage() {
             {[
               { label: "Ürün Maliyeti (COGS)", value: product.cogs, color: "bg-slate-500" },
               { label: "Komisyon", value: product.commission_cost, color: "bg-orange-500" },
+              { label: "Platform Ücreti", value: product.platform_fee, color: "bg-violet-500" },
+              { label: "İşlem Ücreti", value: product.transaction_fee, color: "bg-indigo-500" },
               { label: "Kargo", value: product.shipping_cost, color: "bg-amber-500" },
               { label: "Reklam", value: product.ad_spend, color: "bg-blue-500" },
               { label: "İade Bedeli", value: product.refund_amount, color: "bg-rose-500" },
@@ -213,6 +267,15 @@ export default function ProductDetailPage() {
           <div className="glass-card p-4 mb-4 border-l-4 border-brand-500">
             <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Ana Neden</p>
             <p className="text-base font-semibold text-white">{rootCause.main_cause}</p>
+            {rootCause.main_cause_supporting_refs.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {rootCause.main_cause_supporting_refs.map((ref) => (
+                  <span key={ref} className="badge-info">
+                    Ref: {ref}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Explanation */}
@@ -290,6 +353,9 @@ export default function ProductDetailPage() {
                   <div key={i} className="glass-card p-3 text-xs">
                     <span className="badge-neutral mr-2">{ev.source}</span>
                     <span className="text-slate-300">"{ev.text}"</span>
+                    <div className="mt-1 text-[11px] text-slate-500">
+                      Ref: {ev.reference_id || "-"} | Score: {ev.relevance_score.toFixed(2)}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -451,6 +517,57 @@ export default function ProductDetailPage() {
                     {action.expected_impact && (
                       <p className="text-xs text-slate-500 mt-1">Beklenen etki: {action.expected_impact}</p>
                     )}
+                    {editingActionId === action.action_id && (
+                      <div className="mt-3 space-y-2 glass-card p-3">
+                        <input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          placeholder="Baslik"
+                          className="w-full rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-sm text-white"
+                        />
+                        <textarea
+                          value={editReason}
+                          onChange={(e) => setEditReason(e.target.value)}
+                          placeholder="Gerekce"
+                          rows={2}
+                          className="w-full rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-sm text-white"
+                        />
+                        <input
+                          value={editImpact}
+                          onChange={(e) => setEditImpact(e.target.value)}
+                          placeholder="Beklenen etki"
+                          className="w-full rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-sm text-white"
+                        />
+                        <select
+                          value={editRisk}
+                          onChange={(e) => setEditRisk(e.target.value as RiskLevel)}
+                          className="w-full rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-sm text-white"
+                        >
+                          <option value="low">low</option>
+                          <option value="medium">medium</option>
+                          <option value="high">high</option>
+                          <option value="critical">critical</option>
+                        </select>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleActionEdit(action.action_id)}
+                            disabled={savingEdit}
+                            className="btn-success !py-1.5 !px-3 !text-xs"
+                          >
+                            {savingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                            Kaydet
+                          </button>
+                          <button
+                            onClick={cancelEditing}
+                            disabled={savingEdit}
+                            className="btn-ghost !py-1.5 !px-3 !text-xs"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Vazgec
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   {action.status === "pending" && (
                     <div className="flex items-center gap-2 shrink-0">
@@ -460,6 +577,13 @@ export default function ProductDetailPage() {
                       >
                         <CheckCircle2 className="h-3.5 w-3.5" />
                         Onayla
+                      </button>
+                      <button
+                        onClick={() => startEditing(action)}
+                        className="btn-ghost !py-1.5 !px-3 !text-xs"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Duzenle
                       </button>
                       <button
                         onClick={() => handleActionReject(action.action_id)}

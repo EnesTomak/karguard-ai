@@ -13,9 +13,10 @@ if str(BACKEND_DIR) not in sys.path:
 
 os.environ["DEBUG"] = "true"
 
-from app.api import actions, analyze
+from app.api import analyze
 from app.config import settings
 from app.main import app
+from app.services.action_registry import clear_cache as clear_action_cache
 from app.services.finance_engine import FinanceEngine
 from app.services.storage_service import init_db
 
@@ -31,12 +32,14 @@ def isolate_state(tmp_path, monkeypatch):
 
     FinanceEngine._cache.clear()
     analyze._runs.clear()
-    actions._actions.clear()
+    analyze._tasks.clear()
+    clear_action_cache()
     init_db()
     yield
     FinanceEngine._cache.clear()
     analyze._runs.clear()
-    actions._actions.clear()
+    analyze._tasks.clear()
+    clear_action_cache()
 
 
 @pytest.fixture

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -29,7 +29,7 @@ from app.models.schemas import (
 
 
 def _utc_now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 @contextmanager
@@ -231,6 +231,14 @@ def upsert_root_causes(run_id: str, items: dict[str, RootCauseAnalysis]) -> None
         )
 
 
+def delete_root_causes(run_id: str) -> None:
+    with _get_conn() as conn:
+        conn.execute(
+            "DELETE FROM root_cause_snapshots WHERE run_id = ?",
+            (run_id,),
+        )
+
+
 def get_root_cause(run_id: str, sku: str) -> RootCauseAnalysis | None:
     with _get_conn() as conn:
         row = conn.execute(
@@ -271,6 +279,14 @@ def upsert_actions(run_id: str, actions: list[ActionCard]) -> None:
                 )
                 for a in actions
             ],
+        )
+
+
+def delete_actions(run_id: str) -> None:
+    with _get_conn() as conn:
+        conn.execute(
+            "DELETE FROM action_cards WHERE run_id = ?",
+            (run_id,),
         )
 
 

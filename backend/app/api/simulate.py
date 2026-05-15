@@ -20,5 +20,8 @@ async def simulate(run_id: str, sku: str, req: SimulationRequest):
     if product is None:
         raise HTTPException(status_code=404, detail=f"SKU not found: {sku}")
 
-    return run_simulation(product, req)
+    try:
+        return run_simulation(product, req)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -60,10 +60,13 @@ class SKUProfitability(BaseModel):
     sku: str
     product_name: str
     category: str = ""
+    order_count: int = 0
     quantity_sold: int = 0
     gross_revenue: float = 0.0
     cogs: float = 0.0
     commission_cost: float = 0.0
+    platform_fee: float = 0.0
+    transaction_fee: float = 0.0
     shipping_cost: float = 0.0
     ad_spend: float = 0.0
     return_count: int = 0
@@ -80,6 +83,8 @@ class SKUProfitability(BaseModel):
 class DashboardKPIs(BaseModel):
     total_revenue: float = 0.0
     total_net_profit: float = 0.0
+    total_platform_fees: float = 0.0
+    total_transaction_fees: float = 0.0
     average_margin: float = 0.0
     total_orders: int = 0
     total_returns: int = 0
@@ -112,6 +117,7 @@ class RootCauseAnalysis(BaseModel):
     main_cause: str = ""
     explanation: str = ""
     evidence: list[EvidenceItem] = []
+    main_cause_supporting_refs: list[str] = []
     review_problems: list[str] = []
     return_reasons: dict[str, int] = {}
     description_gaps: list[str] = []

@@ -1,7 +1,7 @@
-"""Qdrant RAG Service — Knowledge Layer for KârGuard AI.
+﻿"""Qdrant RAG Service â€” Knowledge Layer for KÃ¢rGuard AI.
 
 Provides:
-- In-memory Qdrant vector store (no external server needed)
+- Qdrant local persistence mode (no external server needed)
 - Embedding pipeline using Gemini embedding models
 - Semantic search across reviews, product descriptions, and policies
 - Evidence retrieval for root cause analysis
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -23,28 +22,28 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ── Qdrant Client Singleton ──────────────────────────
+# â”€â”€ Qdrant Client Singleton â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _client: QdrantClient | None = None
-_indexed_runs: set[str] = set()  # Track which run_dirs have been indexed
+_indexed_runs: dict[str, str] = {}  # run_id -> input file signature
 
 
 def get_qdrant_client() -> QdrantClient:
-    """Lazy-initialize Qdrant client in :memory: or server mode."""
+    """Lazy-initialize Qdrant client in memory/local/server mode."""
     global _client
     if _client is None:
         if settings.QDRANT_MODE == "memory":
             _client = QdrantClient(":memory:")
-            logger.info("Qdrant client başlatıldı (:memory: modu)")
+            logger.info("Qdrant client baslatildi (:memory: mode)")
+        elif settings.QDRANT_MODE == "local":
+            _client = QdrantClient(path=str(settings.QDRANT_LOCAL_PATH))
+            logger.info("Qdrant client baslatildi (local path: %s)", settings.QDRANT_LOCAL_PATH)
         else:
             _client = QdrantClient(
                 host=settings.QDRANT_HOST,
                 port=settings.QDRANT_PORT,
             )
-            logger.info(
-                f"Qdrant client başlatıldı "
-                f"({settings.QDRANT_HOST}:{settings.QDRANT_PORT})"
-            )
+            logger.info("Qdrant client baslatildi (%s:%s)", settings.QDRANT_HOST, settings.QDRANT_PORT)
         _ensure_collections(_client)
     return _client
 
@@ -62,11 +61,11 @@ def health_check() -> dict[str, Any]:
             "collection_count": len(collection_names),
         }
     except Exception as e:
-        logger.error(f"Qdrant health check başarısız: {e}")
+        logger.error(f"Qdrant health check baÅŸarÄ±sÄ±z: {e}")
         return {"status": "unhealthy", "error": str(e)}
 
 
-# ── Collection Management ────────────────────────────
+# â”€â”€ Collection Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _ensure_collections(client: QdrantClient) -> None:
     """Create the 3 required collections if they don't exist."""
@@ -87,10 +86,10 @@ def _ensure_collections(client: QdrantClient) -> None:
                     distance=models.Distance.COSINE,
                 ),
             )
-            logger.info(f"Collection oluşturuldu: {name}")
+            logger.info(f"Collection oluÅŸturuldu: {name}")
 
 
-# ── Embedding Pipeline ───────────────────────────────
+# â”€â”€ Embedding Pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _get_genai_client():
     """Get the Gemini client for embeddings (reuses gemini_service singleton)."""
@@ -187,29 +186,77 @@ def embed_batch(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list
         except Exception as e:
             error_str = str(e)
             if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                logger.warning(f"Rate limit — 5s bekleniyor... ({i+1}/{len(texts)})")
+                logger.warning(f"Rate limit â€” 5s bekleniyor... ({i+1}/{len(texts)})")
                 time.sleep(5)
                 try:
                     vec = embed_text(text, task_type)
                     vectors.append(vec)
                 except Exception as retry_err:
-                    logger.error(f"Embedding başarısız (retry): {retry_err}")
+                    logger.error(f"Embedding baÅŸarÄ±sÄ±z (retry): {retry_err}")
                     # Zero vector as fallback
                     vectors.append([0.0] * settings.EMBEDDING_DIM)
             else:
-                logger.error(f"Embedding hatası: {e}")
+                logger.error(f"Embedding hatasÄ±: {e}")
                 vectors.append([0.0] * settings.EMBEDDING_DIM)
     return vectors
 
 
-# ── Indexing Functions ────────────────────────────────
+# â”€â”€ Indexing Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _text_id(text: str) -> int:
+def _text_id(text: str, namespace: str = "") -> int:
     """Generate a stable integer ID from text content."""
-    return int(hashlib.md5(text.encode()).hexdigest()[:15], 16)
+    raw = f"{namespace}|{text}" if namespace else text
+    return int(hashlib.md5(raw.encode()).hexdigest()[:15], 16)
 
 
-def index_reviews(run_dir: Path) -> int:
+def _build_run_signature(run_dir: Path) -> str:
+    tracked_files = (
+        "reviews.csv",
+        "products.csv",
+        "product_descriptions.csv",
+    )
+    parts: list[str] = []
+    for name in tracked_files:
+        file_path = run_dir / name
+        if file_path.exists():
+            stat = file_path.stat()
+            parts.append(f"{name}:{stat.st_size}:{stat.st_mtime_ns}")
+        else:
+            parts.append(f"{name}:missing")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()
+
+
+def _build_run_filter(run_id: str, sku: str | None = None) -> models.Filter:
+    must_conditions: list[models.FieldCondition] = [
+        models.FieldCondition(
+            key="run_id",
+            match=models.MatchValue(value=run_id),
+        )
+    ]
+    if sku is not None:
+        must_conditions.append(
+            models.FieldCondition(
+                key="sku",
+                match=models.MatchValue(value=sku),
+            )
+        )
+    return models.Filter(must=must_conditions)
+
+
+def _delete_run_points(client: QdrantClient, run_id: str) -> None:
+    run_filter = _build_run_filter(run_id)
+    for collection_name in (
+        settings.QDRANT_COLLECTION_REVIEWS,
+        settings.QDRANT_COLLECTION_PRODUCTS,
+    ):
+        client.delete(
+            collection_name=collection_name,
+            points_selector=run_filter,
+            wait=True,
+        )
+
+
+def index_reviews(run_dir: Path, run_id: str) -> int:
     """Index reviews from reviews.csv into reviews_index collection.
 
     Args:
@@ -220,7 +267,7 @@ def index_reviews(run_dir: Path) -> int:
     """
     reviews_path = run_dir / "reviews.csv"
     if not reviews_path.exists():
-        logger.warning(f"reviews.csv bulunamadı: {reviews_path}")
+        logger.warning(f"reviews.csv bulunamadÄ±: {reviews_path}")
         return 0
 
     client = get_qdrant_client()
@@ -242,6 +289,7 @@ def index_reviews(run_dir: Path) -> int:
         enriched = f"[SKU: {sku}] [Puan: {rating}/5] {comment}"
         texts.append(enriched)
         payloads.append({
+            "run_id": run_id,
             "sku": sku,
             "rating": rating,
             "comment": comment,
@@ -253,12 +301,12 @@ def index_reviews(run_dir: Path) -> int:
     if not texts:
         return 0
 
-    logger.info(f"Reviews embedding başlıyor ({len(texts)} yorum)...")
+    logger.info(f"Reviews embedding baÅŸlÄ±yor ({len(texts)} yorum)...")
     vectors = embed_batch(texts)
 
     points = [
         models.PointStruct(
-            id=_text_id(texts[i]),
+            id=_text_id(texts[i], namespace=f"{run_id}:reviews"),
             vector=vectors[i],
             payload=payloads[i],
         )
@@ -270,11 +318,11 @@ def index_reviews(run_dir: Path) -> int:
         points=points,
         wait=True,
     )
-    logger.info(f"✅ {len(points)} review vektörleştirildi → reviews_index")
+    logger.info(f"âœ… {len(points)} review vektÃ¶rleÅŸtirildi â†’ reviews_index")
     return len(points)
 
 
-def index_product_descriptions(run_dir: Path) -> int:
+def index_product_descriptions(run_dir: Path, run_id: str) -> int:
     """Index product descriptions into product_description_index.
 
     Uses product_descriptions.csv if available, falls back to products.csv.
@@ -305,9 +353,10 @@ def index_product_descriptions(run_dir: Path) -> int:
             description = str(row.get("detailed_description", ""))
             sku = str(row.get("sku", ""))
 
-            enriched = f"{name} — {category}. {description}"
+            enriched = f"{name} â€” {category}. {description}"
             texts.append(enriched)
             payloads.append({
+                "run_id": run_id,
                 "sku": sku,
                 "name": name,
                 "category": category,
@@ -322,9 +371,10 @@ def index_product_descriptions(run_dir: Path) -> int:
             description = str(row.get("description", ""))
             sku = str(row.get("sku", ""))
 
-            enriched = f"{name} — {category}. {description}"
+            enriched = f"{name} â€” {category}. {description}"
             texts.append(enriched)
             payloads.append({
+                "run_id": run_id,
                 "sku": sku,
                 "name": name,
                 "category": category,
@@ -332,18 +382,18 @@ def index_product_descriptions(run_dir: Path) -> int:
                 "source": "product_description",
             })
     else:
-        logger.warning("Ürün açıklama dosyası bulunamadı.")
+        logger.warning("ÃœrÃ¼n aÃ§Ä±klama dosyasÄ± bulunamadÄ±.")
         return 0
 
     if not texts:
         return 0
 
-    logger.info(f"Product description embedding başlıyor ({len(texts)} ürün)...")
+    logger.info(f"Product description embedding baÅŸlÄ±yor ({len(texts)} Ã¼rÃ¼n)...")
     vectors = embed_batch(texts)
 
     points = [
         models.PointStruct(
-            id=_text_id(texts[i]),
+            id=_text_id(texts[i], namespace=f"{run_id}:products"),
             vector=vectors[i],
             payload=payloads[i],
         )
@@ -355,7 +405,7 @@ def index_product_descriptions(run_dir: Path) -> int:
         points=points,
         wait=True,
     )
-    logger.info(f"✅ {len(points)} ürün açıklaması vektörleştirildi → product_description_index")
+    logger.info(f"âœ… {len(points)} Ã¼rÃ¼n aÃ§Ä±klamasÄ± vektÃ¶rleÅŸtirildi â†’ product_description_index")
     return len(points)
 
 
@@ -369,7 +419,7 @@ def index_policies() -> int:
     """
     policy_path = settings.POLICY_PATH
     if not policy_path.exists():
-        logger.warning(f"Politika dosyası bulunamadı: {policy_path}")
+        logger.warning(f"Politika dosyasÄ± bulunamadÄ±: {policy_path}")
         return 0
 
     client = get_qdrant_client()
@@ -382,17 +432,18 @@ def index_policies() -> int:
         return 0
 
     texts = [c["text"] for c in chunks]
-    logger.info(f"Policy embedding başlıyor ({len(texts)} bölüm)...")
+    logger.info(f"Policy embedding baÅŸlÄ±yor ({len(texts)} bÃ¶lÃ¼m)...")
     vectors = embed_batch(texts)
 
     points = [
         models.PointStruct(
-            id=_text_id(texts[i]),
+            id=_text_id(texts[i], namespace="global:policy"),
             vector=vectors[i],
             payload={
                 "section": chunks[i]["section"],
                 "subsection": chunks[i].get("subsection", ""),
                 "text": chunks[i]["text"],
+                "chunk_id": f"policy-{i + 1}",
                 "source": "policy",
             },
         )
@@ -404,7 +455,7 @@ def index_policies() -> int:
         points=points,
         wait=True,
     )
-    logger.info(f"✅ {len(points)} politika bölümü vektörleştirildi → policy_index")
+    logger.info(f"âœ… {len(points)} politika bÃ¶lÃ¼mÃ¼ vektÃ¶rleÅŸtirildi â†’ policy_index")
     return len(points)
 
 
@@ -468,111 +519,129 @@ def index_all(run_dir: Path) -> dict[str, int]:
     Returns:
         Dict with counts per collection.
     """
-    run_key = str(run_dir)
-    if run_key in _indexed_runs:
-        logger.info(f"Bu dizin zaten indekslenmiş: {run_dir.name}")
+    if settings.DEMO_OFFLINE_MODE or not settings.GEMINI_API_KEY:
+        logger.info("RAG indexing skipped (demo offline mode or missing Gemini API key).")
         return {"reviews": 0, "products": 0, "policies": 0, "skipped": True}
 
+    run_id = run_dir.name
+    run_signature = _build_run_signature(run_dir)
+    if _indexed_runs.get(run_id) == run_signature:
+        logger.info(f"Bu run zaten indekslenmis: {run_id}")
+        return {"reviews": 0, "products": 0, "policies": 0, "skipped": True}
+
+    client = get_qdrant_client()
+    _delete_run_points(client, run_id)
+
     results = {
-        "reviews": index_reviews(run_dir),
-        "products": index_product_descriptions(run_dir),
+        "reviews": index_reviews(run_dir, run_id=run_id),
+        "products": index_product_descriptions(run_dir, run_id=run_id),
         "policies": index_policies(),
         "skipped": False,
     }
 
-    _indexed_runs.add(run_key)
+    _indexed_runs[run_id] = run_signature
     total = results["reviews"] + results["products"] + results["policies"]
     logger.info(
-        f"✅ RAG indexing tamamlandı: {total} toplam vektör "
+        f"âœ… RAG indexing tamamlandÄ±: {total} toplam vektÃ¶r "
         f"(reviews={results['reviews']}, products={results['products']}, "
         f"policies={results['policies']})"
     )
     return results
 
 
-# ── Semantic Search Functions ─────────────────────────
+# â”€â”€ Semantic Search Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def search_reviews_by_sku(
+    run_id: str,
     sku: str,
     query: str | None = None,
     top_k: int = 5,
 ) -> list[dict]:
-    """Search reviews by SKU with optional semantic query.
-
-    Args:
-        sku: Product SKU to filter by.
-        query: Optional semantic query (e.g., "beden problemi").
-               If None, retrieves all reviews for the SKU sorted by relevance.
-        top_k: Maximum number of results.
-
-    Returns:
-        List of review dicts with scores.
-    """
+    """Search reviews by SKU with optional semantic query."""
     client = get_qdrant_client()
 
-    # Build SKU filter
-    sku_filter = models.Filter(
-        must=[
-            models.FieldCondition(
-                key="sku",
-                match=models.MatchValue(value=sku),
-            )
-        ]
-    )
+    sku_filter = _build_run_filter(run_id=run_id, sku=sku)
 
     if query:
-        # Semantic search with SKU filter
-        query_vector = embed_text(query, task_type="RETRIEVAL_QUERY")
+        try:
+            query_vector = embed_text(query, task_type="RETRIEVAL_QUERY")
+        except Exception as exc:
+            logger.warning("Semantic review search fallback to filter-only mode: %s", exc)
+            query = None
+    if query:
         results = client.search(
             collection_name=settings.QDRANT_COLLECTION_REVIEWS,
             query_vector=query_vector,
             query_filter=sku_filter,
             limit=top_k,
         )
-    else:
-        # Scroll all reviews for the SKU (no query vector needed)
-        scroll_results = client.scroll(
-            collection_name=settings.QDRANT_COLLECTION_REVIEWS,
-            scroll_filter=sku_filter,
-            limit=top_k,
-        )
-        # Return as list of dicts
         return [
             {
-                **_payload_to_dict(point.payload),
-                "score": 1.0,
+                **_payload_to_dict(hit.payload),
+                "score": round(hit.score, 4),
+                "reference_id": (
+                    _payload_to_dict(hit.payload).get("review_id")
+                    or f"qdrant:{hit.id}"
+                ),
             }
-            for point in scroll_results[0]
+            for hit in results
         ]
 
+    scroll_results = client.scroll(
+        collection_name=settings.QDRANT_COLLECTION_REVIEWS,
+        scroll_filter=sku_filter,
+        limit=top_k,
+    )
     return [
         {
-            **_payload_to_dict(hit.payload),
-            "score": round(hit.score, 4),
+            **_payload_to_dict(point.payload),
+            "score": 1.0,
+            "reference_id": (
+                _payload_to_dict(point.payload).get("review_id")
+                or f"qdrant:{point.id}"
+            ),
         }
-        for hit in results
+        for point in scroll_results[0]
     ]
 
 
 def search_product_description(
+    run_id: str,
     query: str,
+    sku: str | None = None,
     top_k: int = 3,
 ) -> list[dict]:
-    """Search product descriptions by semantic similarity.
-
-    Args:
-        query: Search query (e.g., "beden tablosu", "kumaş kalitesi").
-        top_k: Maximum number of results.
-
-    Returns:
-        List of product description dicts with scores.
-    """
+    """Search product descriptions by semantic similarity."""
     client = get_qdrant_client()
-    query_vector = embed_text(query, task_type="RETRIEVAL_QUERY")
+    query_filter = _build_run_filter(run_id=run_id, sku=sku)
+    query_vector: list[float] | None = None
+    try:
+        query_vector = embed_text(query, task_type="RETRIEVAL_QUERY")
+    except Exception as exc:
+        logger.warning("Semantic description search fallback to filter-only mode: %s", exc)
+
+    if query_vector is None:
+        scroll_results = client.scroll(
+            collection_name=settings.QDRANT_COLLECTION_PRODUCTS,
+            scroll_filter=query_filter,
+            limit=top_k,
+        )
+        return [
+            {
+                **_payload_to_dict(point.payload),
+                "score": 1.0,
+                "reference_id": (
+                    _payload_to_dict(point.payload).get("sku")
+                    or f"qdrant:{point.id}"
+                ),
+            }
+            for point in scroll_results[0]
+        ]
 
     results = client.search(
         collection_name=settings.QDRANT_COLLECTION_PRODUCTS,
         query_vector=query_vector,
+        query_filter=query_filter,
         limit=top_k,
     )
 
@@ -580,6 +649,10 @@ def search_product_description(
         {
             **_payload_to_dict(hit.payload),
             "score": round(hit.score, 4),
+            "reference_id": (
+                _payload_to_dict(hit.payload).get("sku")
+                or f"qdrant:{hit.id}"
+            ),
         }
         for hit in results
     ]
@@ -589,15 +662,7 @@ def search_marketplace_policy(
     query: str,
     top_k: int = 3,
 ) -> list[dict]:
-    """Search marketplace policies by semantic similarity.
-
-    Args:
-        query: Policy-related query (e.g., "iade koşulları", "komisyon oranı").
-        top_k: Maximum number of results.
-
-    Returns:
-        List of policy chunk dicts with scores.
-    """
+    """Search marketplace policies by semantic similarity."""
     client = get_qdrant_client()
     query_vector = embed_text(query, task_type="RETRIEVAL_QUERY")
 
@@ -611,12 +676,17 @@ def search_marketplace_policy(
         {
             **_payload_to_dict(hit.payload),
             "score": round(hit.score, 4),
+            "reference_id": (
+                _payload_to_dict(hit.payload).get("chunk_id")
+                or f"qdrant:{hit.id}"
+            ),
         }
         for hit in results
     ]
 
 
 def retrieve_root_cause_evidence(
+    run_id: str,
     sku: str,
     financial_summary: str,
     top_k_reviews: int = 5,
@@ -631,7 +701,7 @@ def retrieve_root_cause_evidence(
     Args:
         sku: Product SKU.
         financial_summary: Brief financial context for semantic matching
-                          (e.g., "yüksek iade oranı, düşük kâr marjı").
+                          (e.g., "yÃ¼ksek iade oranÄ±, dÃ¼ÅŸÃ¼k kÃ¢r marjÄ±").
         top_k_reviews: Max reviews to retrieve.
         top_k_descriptions: Max product descriptions.
         top_k_policies: Max policy chunks.
@@ -646,39 +716,42 @@ def retrieve_root_cause_evidence(
     }
 
     try:
-        # 1. Reviews — search by financial context within SKU
+        # 1. Reviews â€” search by financial context within SKU
         evidence["reviews"] = search_reviews_by_sku(
+            run_id=run_id,
             sku=sku,
             query=financial_summary,
             top_k=top_k_reviews,
         )
     except Exception as e:
-        logger.warning(f"Review araması başarısız ({sku}): {e}")
+        logger.warning(f"Review aramasÄ± baÅŸarÄ±sÄ±z ({sku}): {e}")
 
     try:
-        # 2. Product descriptions — find related product info
+        # 2. Product descriptions â€” find related product info
         evidence["product_descriptions"] = search_product_description(
+            run_id=run_id,
             query=f"{sku} {financial_summary}",
+            sku=sku,
             top_k=top_k_descriptions,
         )
     except Exception as e:
-        logger.warning(f"Ürün açıklaması araması başarısız: {e}")
+        logger.warning(f"ÃœrÃ¼n aÃ§Ä±klamasÄ± aramasÄ± baÅŸarÄ±sÄ±z: {e}")
 
     try:
-        # 3. Policies — find relevant marketplace rules
+        # 3. Policies â€” find relevant marketplace rules
         evidence["policies"] = search_marketplace_policy(
             query=financial_summary,
             top_k=top_k_policies,
         )
     except Exception as e:
-        logger.warning(f"Politika araması başarısız: {e}")
+        logger.warning(f"Politika aramasÄ± baÅŸarÄ±sÄ±z: {e}")
 
     total = sum(len(v) for v in evidence.values())
     logger.info(
-        f"RAG evidence toplandı ({sku}): "
+        f"RAG evidence toplandÄ± ({sku}): "
         f"{len(evidence['reviews'])} review, "
-        f"{len(evidence['product_descriptions'])} açıklama, "
-        f"{len(evidence['policies'])} politika — toplam {total}"
+        f"{len(evidence['product_descriptions'])} aÃ§Ä±klama, "
+        f"{len(evidence['policies'])} politika â€” toplam {total}"
     )
     return evidence
 
@@ -706,10 +779,10 @@ async def generate_evidence_summary(
         for r in evidence["reviews"]:
             score_str = f" (benzerlik: {r['score']:.2f})" if r.get("score") else ""
             review_lines.append(
-                f"  - ⭐{r.get('rating', '?')}/5: \"{r.get('comment', '')}\"{score_str}"
+                f"  - â­{r.get('rating', '?')}/5: \"{r.get('comment', '')}\"{score_str}"
             )
         sections.append(
-            f"### Müşteri Yorumları ({len(evidence['reviews'])} adet)\n"
+            f"### MÃ¼ÅŸteri YorumlarÄ± ({len(evidence['reviews'])} adet)\n"
             + "\n".join(review_lines)
         )
 
@@ -720,7 +793,7 @@ async def generate_evidence_summary(
                 f"  - {d.get('name', '')}: {d.get('description', '')[:200]}..."
             )
         sections.append(
-            f"### Ürün Açıklamaları\n" + "\n".join(desc_lines)
+            f"### ÃœrÃ¼n AÃ§Ä±klamalarÄ±\n" + "\n".join(desc_lines)
         )
 
     if evidence.get("policies"):
@@ -733,35 +806,37 @@ async def generate_evidence_summary(
                 f"  - [{section} > {subsection}]: {text_preview}..."
             )
         sections.append(
-            f"### İlgili Politikalar\n" + "\n".join(policy_lines)
+            f"### Ä°lgili Politikalar\n" + "\n".join(policy_lines)
         )
 
     if not sections:
-        return "Kanıt bulunamadı."
+        return "KanÄ±t bulunamadÄ±."
 
     evidence_text = "\n\n".join(sections)
 
-    prompt = f"""Aşağıdaki kanıtları analiz ederek {sku} ürünü için kısa bir kanıt özeti oluştur.
-Özetin 3-5 cümle olsun. Müşteri yorumlarındaki kalıpları, ürün açıklamasındaki eksiklikleri ve ilgili politikaları vurgula.
+    prompt = f"""AÅŸaÄŸÄ±daki kanÄ±tlarÄ± analiz ederek {sku} Ã¼rÃ¼nÃ¼ iÃ§in kÄ±sa bir kanÄ±t Ã¶zeti oluÅŸtur.
+Ã–zetin 3-5 cÃ¼mle olsun. MÃ¼ÅŸteri yorumlarÄ±ndaki kalÄ±plarÄ±, Ã¼rÃ¼n aÃ§Ä±klamasÄ±ndaki eksiklikleri ve ilgili politikalarÄ± vurgula.
 
 {evidence_text}
 
-Kanıt Özeti:"""
+KanÄ±t Ã–zeti:"""
 
     try:
         summary = await generate_text(
             prompt=prompt,
-            system_instruction="Sen bir e-ticaret analiz asistanısın. Kanıtları özetlerken objektif ol ve verilere dayalı konuş.",
+            system_instruction="Sen bir e-ticaret analiz asistanÄ±sÄ±n. KanÄ±tlarÄ± Ã¶zetlerken objektif ol ve verilere dayalÄ± konuÅŸ.",
             temperature=0.3,
         )
         return summary.strip()
     except Exception as e:
-        logger.error(f"Kanıt özeti oluşturulamadı: {e}")
+        logger.error(f"KanÄ±t Ã¶zeti oluÅŸturulamadÄ±: {e}")
         # Fallback: simple text summary
         total = sum(len(v) for v in evidence.values())
         return (
-            f"{sku} için {total} kanıt toplandı: "
+            f"{sku} iÃ§in {total} kanÄ±t toplandÄ±: "
             f"{len(evidence.get('reviews', []))} yorum, "
-            f"{len(evidence.get('product_descriptions', []))} açıklama, "
+            f"{len(evidence.get('product_descriptions', []))} aÃ§Ä±klama, "
             f"{len(evidence.get('policies', []))} politika."
         )
+
+

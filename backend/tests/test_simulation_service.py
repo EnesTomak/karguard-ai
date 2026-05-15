@@ -37,5 +37,5 @@ def test_run_simulation_returns_expected_profit_delta():
     assert result.simulated_profit == pytest.approx(294.0, abs=0.01)
     assert result.profit_delta == pytest.approx(264.0, abs=0.01)
     assert result.new_margin == pytest.approx(24.3, abs=0.01)
-    assert len(result.assumptions) == 4
+    assert len(result.assumptions) == 5
 

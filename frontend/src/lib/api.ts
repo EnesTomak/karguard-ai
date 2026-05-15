@@ -8,6 +8,7 @@ import type {
   SimulationRequest,
   SimulationResult,
   ActionCard,
+  ActionEditRequest,
 } from "../types";
 
 const api = axios.create({
@@ -30,6 +31,11 @@ export async function uploadFiles(files: File[]): Promise<UploadResponse> {
 
 export async function startAnalysis(runId: string): Promise<AnalysisRunResponse> {
   const { data } = await api.post<AnalysisRunResponse>(`/analyze/${runId}`);
+  return data;
+}
+
+export async function getAnalysisStatus(runId: string): Promise<AnalysisRunResponse> {
+  const { data } = await api.get<AnalysisRunResponse>(`/analyze/${runId}`);
   return data;
 }
 
@@ -77,5 +83,10 @@ export async function approveAction(actionId: string): Promise<ActionCard> {
 
 export async function rejectAction(actionId: string): Promise<ActionCard> {
   const { data } = await api.post<ActionCard>(`/actions/${actionId}/reject`);
+  return data;
+}
+
+export async function editAction(actionId: string, req: ActionEditRequest): Promise<ActionCard> {
+  const { data } = await api.patch<ActionCard>(`/actions/${actionId}/edit`, req);
   return data;
 }

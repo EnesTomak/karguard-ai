@@ -53,13 +53,16 @@ def test_finance_engine_calculates_profitability_and_kpis(tmp_path):
     assert sku_a is not None
     assert sku_b is not None
 
-    assert sku_a.net_profit == -120.0
+    assert sku_a.transaction_fee == 5.98
+    assert sku_a.net_profit == -125.98
     assert sku_a.return_count == 1
-    assert sku_b.net_profit == 11.0
+    assert sku_b.transaction_fee == 2.99
+    assert sku_b.net_profit == 8.01
     assert engine.get_loss_makers()[0].sku == "SKU-A"
 
     dashboard = engine.get_dashboard_response("run001")
     assert dashboard.kpis.total_revenue == 350.0
-    assert dashboard.kpis.total_net_profit == -109.0
+    assert dashboard.kpis.total_transaction_fees == 8.97
+    assert dashboard.kpis.total_net_profit == -117.97
     assert dashboard.kpis.loss_making_sku_count == 1
 
