@@ -8,7 +8,7 @@ Exposes deterministic finance capabilities as MCP tools:
 - calculate_risk_score
 """
 
-from __future__ import annotations
+
 
 from pathlib import Path
 from typing import Any
@@ -43,7 +43,6 @@ def _product_to_dict(product: Any) -> dict[str, Any]:
     return product.model_dump()
 
 
-@mcp.tool()
 def calculate_sku_profitability(
     run_id: str,
     sku: str | None = None,
@@ -70,7 +69,6 @@ def calculate_sku_profitability(
     }
 
 
-@mcp.tool()
 def detect_loss_makers(run_id: str, limit: int = 50) -> dict[str, Any]:
     """Return loss-making SKUs (net_profit < 0), sorted by worst loss first."""
     engine = _ensure_engine(run_id)
@@ -83,7 +81,6 @@ def detect_loss_makers(run_id: str, limit: int = 50) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
 def simulate_scenario(
     run_id: str,
     sku: str,
@@ -112,7 +109,6 @@ def simulate_scenario(
     }
 
 
-@mcp.tool()
 def forecast_cashflow_14d(run_id: str) -> dict[str, Any]:
     """Return 14-day cashflow forecast from deterministic engine."""
     engine = _ensure_engine(run_id)
@@ -122,7 +118,6 @@ def forecast_cashflow_14d(run_id: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
 def calculate_risk_score(run_id: str, sku: str) -> dict[str, Any]:
     """Return risk score and level for a specific SKU."""
     engine = _ensure_engine(run_id)
@@ -143,6 +138,56 @@ def calculate_risk_score(run_id: str, sku: str) -> dict[str, Any]:
     }
 
 
+
+
+# --- Adapter Functions for MCP and Gemini ---
+
+def calculate_sku_profitability_tool(run_id: str, sku: str | None = None, limit: int = 50) -> dict[str, Any]:
+    """Return SKU profitability metrics for one SKU or a list sorted by risk."""
+    return calculate_sku_profitability(run_id, sku, limit)
+
+def detect_loss_makers_tool(run_id: str, limit: int = 50) -> dict[str, Any]:
+    """Return loss-making SKUs (net_profit < 0), sorted by worst loss first."""
+    return detect_loss_makers(run_id, limit)
+
+def detect_loss_maker_skus_tool(run_id: str, limit: int = 50) -> dict[str, Any]:
+    """Return only loss-making SKU codes."""
+    result = detect_loss_makers(run_id, limit)
+    return {
+        "run_id": run_id,
+        "skus": [item["sku"] for item in result["items"]],
+        "count": result["count"],
+    }
+
+def simulate_scenario_tool(
+    run_id: str,
+    sku: str,
+    new_price: float | None = None,
+    ad_budget_change_pct: float | None = None,
+    expected_return_rate_change_pct: float | None = None,
+    expected_demand_change_pct: float | None = None,
+) -> dict[str, Any]:
+    """Run deterministic what-if simulation for a SKU."""
+    return simulate_scenario(
+        run_id, sku, new_price, ad_budget_change_pct, expected_return_rate_change_pct, expected_demand_change_pct
+    )
+
+def forecast_cashflow_14d_tool(run_id: str) -> dict[str, Any]:
+    """Return 14-day cashflow forecast from deterministic engine."""
+    return forecast_cashflow_14d(run_id)
+
+def calculate_risk_score_tool(run_id: str, sku: str) -> dict[str, Any]:
+    """Return risk score and level for a specific SKU."""
+    return calculate_risk_score(run_id, sku)
+
+mcp.add_tool(calculate_sku_profitability_tool)
+mcp.add_tool(detect_loss_makers_tool)
+mcp.add_tool(detect_loss_maker_skus_tool)
+mcp.add_tool(simulate_scenario_tool)
+mcp.add_tool(forecast_cashflow_14d_tool)
+mcp.add_tool(calculate_risk_score_tool)
+
 if __name__ == "__main__":
+
     mcp.run()
 

@@ -345,19 +345,36 @@ export default function ProductDetailPage() {
               <div className="flex items-center gap-1.5 mb-2">
                 <Search className="h-4 w-4 text-slate-400" />
                 <p className="text-xs text-slate-400 uppercase tracking-wider">
-                  Kanıtlar ({rootCause.evidence.length} yorum)
+                  Kanıtlar ({rootCause.evidence.length} kaynak)
                 </p>
               </div>
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                {rootCause.evidence.map((ev, i) => (
-                  <div key={i} className="glass-card p-3 text-xs">
-                    <span className="badge-neutral mr-2">{ev.source}</span>
-                    <span className="text-slate-300">"{ev.text}"</span>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      Ref: {ev.reference_id || "-"} | Score: {ev.relevance_score.toFixed(2)}
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {rootCause.evidence.map((ev, i) => {
+                  let badgeClass = "bg-slate-700 text-slate-300";
+                  let label = ev.source;
+                  if (ev.source === "rag_review" || ev.source === "review") {
+                    badgeClass = "bg-blue-500/20 text-blue-400 border border-blue-500/30";
+                    label = "💬 Yorum";
+                  } else if (ev.source === "product_description") {
+                    badgeClass = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+                    label = "📝 Açıklama";
+                  } else if (ev.source === "policy") {
+                    badgeClass = "bg-purple-500/20 text-purple-400 border border-purple-500/30";
+                    label = "📜 Politika";
+                  }
+
+                  return (
+                    <div key={i} className="glass-card p-3 text-xs">
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium mr-2 mb-1 inline-block ${badgeClass}`}>
+                        {label}
+                      </span>
+                      <span className="text-slate-300 leading-relaxed block mt-1">"{ev.text}"</span>
+                      <div className="mt-2 text-[10px] text-slate-500 font-mono">
+                        Ref: {ev.reference_id || "-"} | Score: {ev.relevance_score.toFixed(2)}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

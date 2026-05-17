@@ -8,7 +8,7 @@ Exposes RAG knowledge capabilities as MCP tools:
 - generate_evidence_summary
 """
 
-from __future__ import annotations
+
 
 import asyncio
 from typing import Any

@@ -351,12 +351,23 @@ class FinanceEngine:
         )
 
     def _forecast_cashflow_14d(self) -> float:
-        """Simple 14-day cashflow estimate."""
+        """Simple 14-day cashflow estimate based on actual data date range."""
         products = list(self.profitability.values())
         if not products:
             return 0.0
 
-        # Rough daily estimates from totals
+        # Determine actual date range from orders data
+        data_days = 30  # fallback
+        if hasattr(self, "orders") and not self.orders.empty and "order_date" in self.orders.columns:
+            try:
+                dates = pd.to_datetime(self.orders["order_date"], errors="coerce").dropna()
+                if len(dates) >= 2:
+                    delta = (dates.max() - dates.min()).days
+                    if delta > 0:
+                        data_days = delta
+            except Exception:
+                pass  # keep fallback
+
         total_revenue = sum(p.gross_revenue for p in products)
         total_costs = sum(
             p.cogs
@@ -370,9 +381,8 @@ class FinanceEngine:
             for p in products
         )
 
-        # Assume data covers ~30 days, project to 14
-        daily_revenue = total_revenue / 30
-        daily_cost = total_costs / 30
+        daily_revenue = total_revenue / data_days
+        daily_cost = total_costs / data_days
 
         return (daily_revenue - daily_cost) * 14
 

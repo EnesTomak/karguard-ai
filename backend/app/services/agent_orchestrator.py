@@ -162,12 +162,31 @@ async def run_pipeline(
     )
     await _emit_progress(progress_hook, steps)
 
-    loss_makers = engine.get_loss_makers()
+    from app.services.insight_agent import agentic_detect_loss_makers
+    
+    agentic_skus = await agentic_detect_loss_makers(run_id)
+    
+    # Verify the agentic result with deterministic engine as fallback/guard
+    deterministic_loss_makers = engine.get_loss_makers()
+    deterministic_skus = {p.sku for p in deterministic_loss_makers}
+    
+    # Only keep SKUs that the engine confirms are actually losing money
+    verified_skus = [sku for sku in agentic_skus if sku in deterministic_skus]
+    
+    if not verified_skus:
+        # Fallback to deterministic if the agent completely failed
+        logger.warning(f"Agentic loss maker detection yielded no valid SKUs. Falling back to deterministic engine.")
+        loss_makers = deterministic_loss_makers
+    else:
+        # Use the agent's verified SKUs
+        logger.info(f"Gemini requested tool: detect_loss_makers and found {len(verified_skus)} valid loss makers.")
+        loss_makers = [engine.get_product(sku) for sku in verified_skus]
+
     steps[-1].status = "completed"
     if loss_makers:
         worst = max(loss_makers, key=lambda p: abs(p.net_profit))
         steps[-1].message = (
-            f"{len(loss_makers)} zarar eden urun bulundu. "
+            f"Agent {len(loss_makers)} zarar eden urun buldu. "
             f"En riskli: {worst.product_name} ({worst.net_profit:,.0f} TL zarar)"
         )
     else:

@@ -60,7 +60,7 @@ def run_simulation(product: SKUProfitability, req: SimulationRequest) -> Simulat
         if current_order_count > 0
         else 0
     )
-    refund_per_return = product.refund_amount / product.return_count if product.return_count > 0 else new_price
+    refund_per_return = product.refund_amount / product.return_count if product.return_count > 0 else 0.0
     return_ship_per = product.return_shipping_cost / product.return_count if product.return_count > 0 else 0
 
     new_cogs = unit_cost * new_quantity
