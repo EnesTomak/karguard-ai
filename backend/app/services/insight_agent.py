@@ -211,17 +211,30 @@ async def _collect_evidence(sku: str, run_dir: Path) -> dict[str, Any]:
     # failing when qdrant-client or google-genai is intentionally not installed.
     if not settings.DEMO_OFFLINE_MODE and settings.GEMINI_API_KEY:
         try:
-            from app.services.knowledge_tool_service import retrieve_root_cause_evidence_for_run
-
             financial_hint = f"{sku} ürün problemi iade beden kalite şikayet"
-            rag_evidence = retrieve_root_cause_evidence_for_run(
+            rag_gateway_result = await mcp_gateway.call_tool(
+                server="knowledge-mcp",
+                tool_name="retrieve_root_cause_evidence",
+                arguments={
+                    "run_id": run_dir.name,
+                    "sku": sku,
+                    "financial_summary": financial_hint,
+                    "top_k_reviews": 5,
+                    "top_k_descriptions": 2,
+                    "top_k_policies": 3,
+                },
                 run_id=run_dir.name,
-                sku=sku,
-                financial_summary=financial_hint,
-                top_k_reviews=5,
-                top_k_descriptions=2,
-                top_k_policies=3,
+                agent_name="Insight Agent",
+                step_name="Root Cause Evidence Retrieval",
             )
+
+            if rag_gateway_result.status != "success":
+                raise RuntimeError(rag_gateway_result.error_message or "knowledge-mcp tool call failed")
+
+            rag_payload = rag_gateway_result.result if isinstance(rag_gateway_result.result, dict) else {}
+            rag_evidence = rag_payload.get("evidence", rag_payload)
+            if not isinstance(rag_evidence, dict):
+                raise ValueError("knowledge-mcp.retrieve_root_cause_evidence returned invalid payload")
 
             for review in rag_evidence.get("reviews", []):
                 evidence["rag_reviews"].append(
@@ -255,14 +268,14 @@ async def _collect_evidence(sku: str, run_dir: Path) -> dict[str, Any]:
                 )
 
             logger.info(
-                "Deterministic RAG evidence toplandı (%s): %s review, %s açıklama, %s politika",
+                "MCP Gateway RAG evidence toplandı (%s): %s review, %s açıklama, %s politika",
                 sku,
                 len(evidence["rag_reviews"]),
                 len(evidence["rag_descriptions"]),
                 len(evidence["rag_policies"]),
             )
         except Exception as exc:
-            logger.warning("RAG retrieval başarısız, CSV fallback aktif: %s", exc)
+            logger.warning("knowledge-mcp RAG retrieval başarısız, CSV fallback aktif: %s", exc)
 
     reviews_df = _read_csv_if_exists(run_dir / "reviews.csv")
     if reviews_df is not None:

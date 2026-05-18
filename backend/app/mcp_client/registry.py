@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from app.mcp_servers import finance_mcp_server
+from app.mcp_servers import finance_mcp_server, knowledge_mcp_server
 
 MCPToolCallable = Callable[..., Any]
 
@@ -18,6 +18,13 @@ _TOOL_REGISTRY: dict[str, dict[str, MCPToolCallable]] = {
         "simulate_scenario": finance_mcp_server.simulate_scenario_tool,
         "forecast_cashflow_14d": finance_mcp_server.forecast_cashflow_14d_tool,
         "calculate_risk_score": finance_mcp_server.calculate_risk_score_tool,
+    },
+    "knowledge-mcp": {
+        "search_reviews_by_sku": knowledge_mcp_server.search_reviews_by_sku,
+        "search_product_description": knowledge_mcp_server.search_product_description,
+        "retrieve_root_cause_evidence": knowledge_mcp_server.retrieve_root_cause_evidence,
+        "search_marketplace_policy": knowledge_mcp_server.search_marketplace_policy,
+        "generate_evidence_summary": knowledge_mcp_server.generate_evidence_summary,
     }
 }
 
@@ -41,4 +48,3 @@ def list_tools(server: str) -> list[str]:
     if server_tools is None:
         return []
     return sorted(server_tools.keys())
-

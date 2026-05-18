@@ -19,3 +19,4 @@ backend/app/data/qdrant_local/
 coverage/
 .DS_Store
 Thumbs.db
+backend/app/data/qdrant_local/

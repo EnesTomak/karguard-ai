@@ -65,4 +65,5 @@ def test_finance_engine_calculates_profitability_and_kpis(tmp_path):
     assert dashboard.kpis.total_transaction_fees == 8.97
     assert dashboard.kpis.total_net_profit == -117.97
     assert dashboard.kpis.loss_making_sku_count == 1
+    assert dashboard.kpis.total_orders == 3
 

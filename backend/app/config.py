@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     CORS_ALLOWED_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     CORS_ALLOW_CREDENTIALS: bool = True
+    MAX_FILE_SIZE_MB: int = 10
+    MAX_TOTAL_UPLOAD_MB: int = 50
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -121,6 +121,22 @@ class RootCauseAnalysis(BaseModel):
     review_problems: list[str] = []
     return_reasons: dict[str, int] = {}
     description_gaps: list[str] = []
+
+
+class GuardrailCheck(BaseModel):
+    name: str
+    status: Literal["passed", "failed", "degraded"]
+    message: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GuardrailReport(BaseModel):
+    status: Literal["passed", "failed", "degraded"] = "degraded"
+    verified_by: str = "deterministic_finance_engine"
+    checks: list[GuardrailCheck] = Field(default_factory=list)
+    evidence_refs_valid: bool = False
+    simulation_verified: bool = False
+    tool_trace_ids: list[str] = Field(default_factory=list)
 
 
 class ProductIntelligence(BaseModel):

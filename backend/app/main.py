@@ -9,7 +9,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import actions, analyze, dashboard, products, simulate, traces, upload
+from app.api import actions, analyze, dashboard, guardrails, products, simulate, traces, upload
 from app.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import get_logger, setup_logging
@@ -86,6 +86,7 @@ app.include_router(products.router, prefix="/api", tags=["Products"])
 app.include_router(simulate.router, prefix="/api", tags=["Simulate"])
 app.include_router(actions.router, prefix="/api", tags=["Actions"])
 app.include_router(traces.router, prefix="/api", tags=["Traces"])
+app.include_router(guardrails.router, prefix="/api", tags=["Guardrails"])
 
 
 @app.get("/")

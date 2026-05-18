@@ -328,7 +328,7 @@ class FinanceEngine:
         total_profit = sum(p.net_profit for p in products)
         total_platform_fees = sum(p.platform_fee for p in products)
         total_transaction_fees = sum(p.transaction_fee for p in products)
-        total_orders = sum(p.quantity_sold for p in products)
+        total_orders = sum(p.order_count for p in products)
         total_returns = sum(p.return_count for p in products)
         total_ad = sum(p.ad_spend for p in products)
         loss_makers = [p for p in products if p.net_profit < 0]

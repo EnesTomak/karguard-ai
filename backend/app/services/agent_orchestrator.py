@@ -16,11 +16,18 @@ from app.models.schemas import (
     AnalysisStatus,
     RootCauseAnalysis,
 )
+from app.mcp_client.audit import get_tool_traces
+from app.services.guardrail_service import (
+    build_guardrail_report,
+    verify_evidence_refs,
+    verify_loss_maker_skus,
+)
 from app.services.action_registry import clear_actions_for_run, register_actions
 from app.services.finance_engine import FinanceEngine
 from app.services.storage_service import (
     delete_root_causes,
     get_root_cause as db_get_root_cause,
+    upsert_guardrail_report,
     upsert_kpis,
     upsert_products,
     upsert_root_causes,
@@ -44,6 +51,61 @@ def get_root_cause(run_id: str, sku: str) -> RootCauseAnalysis | None:
 
 def _now_iso() -> str:
     return datetime.now().isoformat()
+
+
+def _tool_trace_ids_for_run(run_id: str) -> list[str]:
+    traces = get_tool_traces(run_id)
+    return [trace.trace_id for trace in traces]
+
+
+def _aggregate_evidence_check(root_causes: dict[str, RootCauseAnalysis]) -> dict[str, object]:
+    if not root_causes:
+        return {
+            "name": "evidence_reference_validation",
+            "status": "degraded",
+            "message": "Evidence dogrulama icin root cause kaydi bulunamadi.",
+            "metadata": {
+                "evidence_refs_valid": False,
+                "validated_skus": [],
+            },
+        }
+
+    checks = [
+        verify_evidence_refs(root_cause=root_cause, evidence_items=root_cause.evidence)
+        for root_cause in root_causes.values()
+    ]
+    failed = [check for check in checks if check["status"] == "failed"]
+    degraded = [check for check in checks if check["status"] == "degraded"]
+    valid_count = sum(
+        1
+        for check in checks
+        if isinstance(check.get("metadata"), dict) and bool(check["metadata"].get("evidence_refs_valid"))
+    )
+
+    if failed:
+        status = "failed"
+        message = f"{len(failed)} SKU icin evidence referanslari dogrulanamadi."
+        evidence_refs_valid = False
+    elif degraded:
+        status = "degraded"
+        message = f"{len(degraded)} SKU icin evidence dogrulamasi eksik veri nedeniyle kisitli."
+        evidence_refs_valid = False
+    else:
+        status = "passed"
+        message = f"{len(checks)} SKU icin evidence referanslari dogrulandi."
+        evidence_refs_valid = True
+
+    return {
+        "name": "evidence_reference_validation",
+        "status": status,
+        "message": message,
+        "metadata": {
+            "evidence_refs_valid": evidence_refs_valid,
+            "validated_skus": sorted(root_causes.keys()),
+            "valid_count": valid_count,
+            "total_count": len(checks),
+        },
+    }
 
 
 def _read_upload_table(run_dir: Path, name: str) -> pd.DataFrame:
@@ -188,6 +250,18 @@ async def run_pipeline(
         )
         loss_makers = [product for sku in verified_skus if (product := engine.get_product(sku)) is not None]
 
+    loss_maker_guardrail_check = verify_loss_maker_skus(
+        agent_skus=agentic_skus,
+        deterministic_skus=deterministic_skus,
+    )
+    upsert_guardrail_report(
+        run_id=run_id,
+        report=build_guardrail_report(
+            loss_maker_check=loss_maker_guardrail_check,
+            tool_trace_ids=_tool_trace_ids_for_run(run_id),
+        ),
+    )
+
     steps[-1].status = "completed"
     if agentic_result.used_fallback:
         steps[-1].message = "MCP tool çağrısı başarısız oldu, deterministic fallback kullanıldı."
@@ -287,6 +361,16 @@ async def run_pipeline(
     else:
         steps[-1].status = "completed"
         steps[-1].message = "Zarar eden urun yok, kok neden analizi atlandi."
+
+    evidence_guardrail_check = _aggregate_evidence_check(root_causes)
+    upsert_guardrail_report(
+        run_id=run_id,
+        report=build_guardrail_report(
+            loss_maker_check=loss_maker_guardrail_check,
+            evidence_check=evidence_guardrail_check,
+            tool_trace_ids=_tool_trace_ids_for_run(run_id),
+        ),
+    )
     await _emit_progress(progress_hook, steps)
 
     # Step 5: Action planning

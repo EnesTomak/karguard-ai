@@ -23,6 +23,7 @@ from app.models.schemas import (
     AnalysisRunResponse,
     DashboardKPIs,
     DashboardResponse,
+    GuardrailReport,
     RootCauseAnalysis,
     SKUProfitability,
 )
@@ -97,6 +98,12 @@ def init_db() -> None:
                 trace_id TEXT PRIMARY KEY,
                 run_id TEXT,
                 trace_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS guardrail_reports (
+                run_id TEXT PRIMARY KEY,
+                report_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
 
@@ -384,4 +391,34 @@ def list_mcp_tool_trace_json(run_id: str) -> list[str]:
             (run_id,),
         ).fetchall()
     return [str(row["trace_json"]) for row in rows]
+
+
+def upsert_guardrail_report(run_id: str, report: GuardrailReport) -> None:
+    now = _utc_now_iso()
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO guardrail_reports (run_id, report_json, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                report_json=excluded.report_json,
+                created_at=excluded.created_at
+            """,
+            (run_id, report.model_dump_json(), now),
+        )
+
+
+def get_guardrail_report(run_id: str) -> GuardrailReport | None:
+    with _get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT report_json
+            FROM guardrail_reports
+            WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return GuardrailReport.model_validate_json(str(row["report_json"]))
 

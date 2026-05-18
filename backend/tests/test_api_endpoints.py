@@ -5,6 +5,7 @@ from datetime import datetime
 import pytest
 
 from app.api.actions import register_actions
+from app.config import settings
 from app.models.schemas import (
     ActionCard,
     ActionStatus,
@@ -26,6 +27,11 @@ def _seed_run(run_id: str) -> None:
             agent_steps=[],
         )
     )
+
+
+def test_upload_limit_defaults():
+    assert settings.MAX_FILE_SIZE_MB == 10
+    assert settings.MAX_TOTAL_UPLOAD_MB == 50
 
 
 @pytest.mark.asyncio
@@ -57,6 +63,35 @@ async def test_upload_rejects_unsupported_extension(client):
     payload = response.json()
     assert payload["error"]["code"] == "http_error"
     assert "Desteklenmeyen dosya t" in payload["detail"]
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_single_file_over_limit(client, monkeypatch):
+    monkeypatch.setattr(settings, "MAX_FILE_SIZE_MB", 1)
+    monkeypatch.setattr(settings, "MAX_TOTAL_UPLOAD_MB", 10)
+
+    files = [
+        ("files", ("orders.csv", b"a" * (1024 * 1024 + 1), "text/csv")),
+    ]
+    response = await client.post("/api/upload", files=files)
+    assert response.status_code in {400, 413}
+    payload = response.json()
+    assert "Tek dosya boyutu limiti" in payload["detail"]
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_total_size_over_limit(client, monkeypatch):
+    monkeypatch.setattr(settings, "MAX_FILE_SIZE_MB", 2)
+    monkeypatch.setattr(settings, "MAX_TOTAL_UPLOAD_MB", 2)
+
+    files = [
+        ("files", ("orders.csv", b"a" * (1200 * 1024), "text/csv")),
+        ("files", ("returns.csv", b"b" * (1200 * 1024), "text/csv")),
+    ]
+    response = await client.post("/api/upload", files=files)
+    assert response.status_code in {400, 413}
+    payload = response.json()
+    assert "Toplam upload limiti" in payload["detail"]
 
 
 @pytest.mark.asyncio
@@ -94,6 +129,14 @@ async def test_simulate_endpoint_uses_cached_product(client):
     payload = response.json()
     assert payload["scenario_label"]
     assert isinstance(payload["simulated_profit"], (int, float))
+
+    trace_response = await client.get(f"/api/traces/{run_id}")
+    assert trace_response.status_code == 200
+    traces = trace_response.json()
+    assert any(
+        trace["server"] == "finance-mcp" and trace["tool_name"] == "simulate_scenario"
+        for trace in traces
+    )
 
 
 @pytest.mark.asyncio
