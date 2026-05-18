@@ -174,9 +174,11 @@ async def run_pipeline(
     # Only keep SKUs that the engine confirms are actually losing money
     verified_skus = [sku for sku in agentic_skus if sku in deterministic_skus]
     
+    used_guardrail_fallback = False
     if not verified_skus:
         # Fallback to deterministic if the agent completely failed
         logger.warning(f"Agentic loss maker detection yielded no valid SKUs. Falling back to deterministic engine.")
+        used_guardrail_fallback = True
         loss_makers = deterministic_loss_makers
     else:
         # Use the agent's verified SKUs
@@ -189,6 +191,11 @@ async def run_pipeline(
     steps[-1].status = "completed"
     if agentic_result.used_fallback:
         steps[-1].message = "MCP tool çağrısı başarısız oldu, deterministic fallback kullanıldı."
+    elif used_guardrail_fallback:
+        steps[-1].message = (
+            "Gemini -> MCP Gateway çağrısı tamamlandı ancak guardrail doğrulamasından geçen SKU bulunamadı; "
+            "deterministic fallback kullanıldı."
+        )
     elif loss_makers:
         worst = max(loss_makers, key=lambda p: abs(p.net_profit))
         steps[-1].message = (
