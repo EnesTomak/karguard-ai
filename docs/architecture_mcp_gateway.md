@@ -3,20 +3,20 @@
 ## Runtime Flow
 ```mermaid
 flowchart LR
-    U[User Upload + Analyze] --> O[Agent Orchestrator]
-    O --> G[Gemini Function Calling]
-    G --> W[Gateway Wrapper Tool]
-    W --> C[MCPClientGateway.call_tool]
-    C --> R[Tool Registry]
-    R --> F[finance-mcp.detect_loss_maker_skus]
-    F --> E[Deterministic FinanceEngine]
-    E --> T[Tool Result]
+    U["User Upload + Analyze"] --> O["Agent Orchestrator"]
+    O --> G["Gemini Function Calling"]
+    G --> W["Gateway Wrapper Tool"]
+    W --> C["MCPClientGateway.call_tool()"]
+    C --> R["Tool Registry"]
+    R --> F["finance-mcp.detect_loss_maker_skus"]
+    F --> E["Deterministic FinanceEngine"]
+    E --> T["Tool Result"]
     T --> C
-    C --> A[Trace Audit: Memory + SQLite]
-    T --> V[Guardrail Validation]
+    C --> A["Trace Audit: Memory + SQLite"]
+    T --> V["Guardrail Validation"]
     V --> O
-    A --> API[GET /api/traces/{run_id}]
-    API --> UI[Upload + Dashboard Trace Panels]
+    A --> API["GET /api/traces/run_id"]
+    API --> UI["Upload + Dashboard Trace Panels"]
 ```
 
 ## Design Guarantees
@@ -32,4 +32,3 @@ flowchart LR
 - P0 uses in-process registry routing instead of stdio transport.
 - Gateway interface is production-oriented and transport-agnostic.
 - Stdio/SSE transport can be introduced later without changing agent API.
-
