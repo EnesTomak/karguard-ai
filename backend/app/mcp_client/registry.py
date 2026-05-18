@@ -48,3 +48,8 @@ def list_tools(server: str) -> list[str]:
     if server_tools is None:
         return []
     return sorted(server_tools.keys())
+
+
+def list_servers() -> list[str]:
+    """List registered MCP server names."""
+    return sorted(_TOOL_REGISTRY.keys())

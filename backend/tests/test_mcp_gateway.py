@@ -209,6 +209,14 @@ def test_knowledge_mcp_registry_contains_required_tools():
     }.issubset(tools)
 
 
+def test_tool_mapper_available_servers_imports_cleanly():
+    from app.mcp_client.tool_mapper import available_servers
+
+    servers = set(available_servers())
+    assert "finance-mcp" in servers
+    assert "knowledge-mcp" in servers
+
+
 @pytest.mark.asyncio
 async def test_collect_evidence_uses_knowledge_mcp_gateway(monkeypatch, tmp_path):
     run_dir = tmp_path / "evidence-run"

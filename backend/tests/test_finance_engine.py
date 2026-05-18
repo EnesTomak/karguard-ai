@@ -67,3 +67,33 @@ def test_finance_engine_calculates_profitability_and_kpis(tmp_path):
     assert dashboard.kpis.loss_making_sku_count == 1
     assert dashboard.kpis.total_orders == 3
 
+
+def test_total_orders_uses_order_count_not_quantity(tmp_path):
+    run_dir = tmp_path / "run-order-count"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_csv(
+        run_dir / "orders.csv",
+        [
+            {"order_id": "o1", "sku": "SKU-A", "quantity": 10, "unit_price": 100, "commission_rate": 0.10, "cargo_cost": 5},
+            {"order_id": "o2", "sku": "SKU-A", "quantity": 10, "unit_price": 100, "commission_rate": 0.10, "cargo_cost": 5},
+        ],
+    )
+    _write_csv(
+        run_dir / "returns.csv",
+        [{"return_id": "r-x", "sku": "SKU-X", "refund_amount": 10, "return_shipping_cost": 2}],
+    )
+    _write_csv(
+        run_dir / "products.csv",
+        [{"sku": "SKU-A", "name": "A Product", "category": "Cat-A", "unit_cost": 70}],
+    )
+    _write_csv(run_dir / "ads.csv", [{"sku": "SKU-A", "spend": 10}])
+
+    engine = FinanceEngine.from_directory(run_dir)
+    dashboard = engine.get_dashboard_response("run-order-count")
+    product = engine.get_product("SKU-A")
+    assert product is not None
+    assert product.quantity_sold == 20
+    assert product.order_count == 2
+    assert dashboard.kpis.total_orders == 2
+
