@@ -9,6 +9,7 @@ import type {
   SimulationResult,
   ActionCard,
   ActionEditRequest,
+  MCPToolTrace,
 } from "../types";
 
 const api = axios.create({
@@ -43,6 +44,11 @@ export async function getAnalysisStatus(runId: string): Promise<AnalysisRunRespo
 
 export async function getDashboard(runId: string): Promise<DashboardResponse> {
   const { data } = await api.get<DashboardResponse>(`/dashboard/${runId}`);
+  return data;
+}
+
+export async function getToolTraces(runId: string): Promise<MCPToolTrace[]> {
+  const { data } = await api.get<MCPToolTrace[]>(`/traces/${runId}`);
   return data;
 }
 

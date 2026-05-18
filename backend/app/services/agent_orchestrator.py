@@ -164,7 +164,8 @@ async def run_pipeline(
 
     from app.services.insight_agent import agentic_detect_loss_makers
     
-    agentic_skus = await agentic_detect_loss_makers(run_id)
+    agentic_result = await agentic_detect_loss_makers(run_id)
+    agentic_skus = agentic_result.skus
     
     # Verify the agentic result with deterministic engine as fallback/guard
     deterministic_loss_makers = engine.get_loss_makers()
@@ -179,14 +180,20 @@ async def run_pipeline(
         loss_makers = deterministic_loss_makers
     else:
         # Use the agent's verified SKUs
-        logger.info(f"Gemini requested tool: detect_loss_makers and found {len(verified_skus)} valid loss makers.")
-        loss_makers = [engine.get_product(sku) for sku in verified_skus]
+        logger.info(
+            "Gemini -> MCP Gateway -> finance-mcp.detect_loss_maker_skus completed with %s verified SKUs.",
+            len(verified_skus),
+        )
+        loss_makers = [product for sku in verified_skus if (product := engine.get_product(sku)) is not None]
 
     steps[-1].status = "completed"
-    if loss_makers:
+    if agentic_result.used_fallback:
+        steps[-1].message = "MCP tool çağrısı başarısız oldu, deterministic fallback kullanıldı."
+    elif loss_makers:
         worst = max(loss_makers, key=lambda p: abs(p.net_profit))
         steps[-1].message = (
-            f"Agent {len(loss_makers)} zarar eden urun buldu. "
+            "Gemini -> MCP Gateway -> finance-mcp.detect_loss_maker_skus çağrısı tamamlandı. "
+            f"{len(loss_makers)} zarar eden urun bulundu. "
             f"En riskli: {worst.product_name} ({worst.net_profit:,.0f} TL zarar)"
         )
     else:

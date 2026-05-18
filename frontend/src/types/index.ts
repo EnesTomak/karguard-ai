@@ -24,6 +24,21 @@ export interface AnalysisRunResponse {
   agent_steps: AgentStep[];
 }
 
+export interface MCPToolTrace {
+  trace_id: string;
+  run_id: string | null;
+  agent_name: string | null;
+  step_name: string | null;
+  server: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  result: unknown;
+  status: "success" | "error";
+  latency_ms: number;
+  error_message: string | null;
+  created_at: string;
+}
+
 export interface SKUProfitability {
   sku: string;
   product_name: string;

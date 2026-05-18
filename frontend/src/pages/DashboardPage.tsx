@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   TrendingUp,
@@ -25,8 +25,8 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { getDashboard } from "../lib/api";
-import type { DashboardResponse, SKUProfitability } from "../types";
+import { getDashboard, getToolTraces } from "../lib/api";
+import type { DashboardResponse, MCPToolTrace, SKUProfitability } from "../types";
 
 /* ── Helpers ───────────────────────────────────────── */
 
@@ -64,13 +64,21 @@ export default function DashboardPage() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardResponse | null>(null);
+  const [toolTraces, setToolTraces] = useState<MCPToolTrace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!runId) return;
     getDashboard(runId)
-      .then((d) => { setData(d); })
+      .then(async (d) => {
+        setData(d);
+        try {
+          setToolTraces(await getToolTraces(runId));
+        } catch {
+          setToolTraces([]);
+        }
+      })
       .catch((err) => { setError(err.response?.data?.detail || "Dashboard verileri yüklenemedi."); })
       .finally(() => { setLoading(false); });
   }, [runId]);
@@ -214,6 +222,39 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      <div className="glass-card p-6">
+        <h2 className="text-lg font-bold">MCP Tool Trace</h2>
+        <p className="text-xs text-slate-400 mt-1">
+          Gemini -&gt; MCP Gateway -&gt; finance-mcp -&gt; Tool Result
+        </p>
+        <div className="mt-4 space-y-2">
+          {toolTraces.length === 0 ? (
+            <p className="text-xs text-slate-500">Bu run için trace kaydı bulunamadı.</p>
+          ) : (
+            toolTraces.slice(-6).reverse().map((trace) => (
+              <div
+                key={trace.trace_id}
+                className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3"
+              >
+                <p className="text-xs text-slate-300">
+                  Gemini requested tool: <span className="font-mono">{trace.tool_name}</span>
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Route: MCP Gateway -&gt; {trace.server}.{trace.tool_name}
+                </p>
+                <p className="text-xs mt-1">
+                  <span className={trace.status === "success" ? "text-emerald-400" : "text-rose-400"}>
+                    Status: {trace.status}
+                  </span>
+                  {" | "}
+                  <span className="text-slate-300">Latency: {trace.latency_ms.toFixed(2)} ms</span>
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
 
       {/* ── Profitability Chart ────────────────────── */}
       <div className="glass-card p-6">

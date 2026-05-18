@@ -13,8 +13,8 @@ import {
   ShieldCheck,
   TrendingDown,
 } from "lucide-react";
-import { uploadFiles, startAnalysis, getAnalysisStatus } from "../lib/api";
-import type { AgentStep } from "../types";
+import { uploadFiles, startAnalysis, getAnalysisStatus, getToolTraces } from "../lib/api";
+import type { AgentStep, MCPToolTrace } from "../types";
 
 const ACCEPTED = ".csv,.xlsx,.xls";
 const REQUIRED_DATASETS = ["orders", "returns", "products", "ads", "reviews"] as const;
@@ -28,7 +28,9 @@ export default function UploadPage() {
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisRunId, setAnalysisRunId] = useState("");
   const [agentSteps, setAgentSteps] = useState<AgentStep[]>([]);
+  const [toolTraces, setToolTraces] = useState<MCPToolTrace[]>([]);
   const [error, setError] = useState("");
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -78,11 +80,18 @@ export default function UploadPage() {
 
     try {
       const uploadRes = await uploadFiles(files);
+      setAnalysisRunId(uploadRes.run_id);
+      setToolTraces([]);
       setUploading(false);
       setAnalyzing(true);
 
       let analysisRes = await startAnalysis(uploadRes.run_id);
       setAgentSteps(analysisRes.agent_steps || []);
+      try {
+        setToolTraces(await getToolTraces(uploadRes.run_id));
+      } catch {
+        // Ignore transient trace-read errors while analysis starts.
+      }
 
       let guard = 0;
       let transientPollErrors = 0;
@@ -91,6 +100,11 @@ export default function UploadPage() {
         try {
           analysisRes = await getAnalysisStatus(uploadRes.run_id);
           setAgentSteps(analysisRes.agent_steps || []);
+          try {
+            setToolTraces(await getToolTraces(uploadRes.run_id));
+          } catch {
+            // Keep progress UI responsive if trace API is temporarily unavailable.
+          }
           transientPollErrors = 0;
         } catch (pollErr: any) {
           transientPollErrors += 1;
@@ -274,6 +288,41 @@ export default function UploadPage() {
                 </div>
               </div>
             ))}
+          </div>
+          <div className="mt-6 pt-5 border-t border-slate-700/50">
+            <p className="text-sm font-semibold text-slate-200">MCP Tool Trace</p>
+            <p className="text-xs text-slate-400 mt-1">
+              Gemini -&gt; MCP Gateway -&gt; finance-mcp -&gt; Tool Result
+            </p>
+            {analysisRunId && (
+              <p className="text-[11px] text-slate-500 mt-1 font-mono">run: {analysisRunId}</p>
+            )}
+            <div className="mt-3 space-y-2">
+              {toolTraces.length === 0 ? (
+                <p className="text-xs text-slate-500">Trace bekleniyor...</p>
+              ) : (
+                toolTraces.slice(-5).reverse().map((trace) => (
+                  <div
+                    key={trace.trace_id}
+                    className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-3"
+                  >
+                    <p className="text-xs text-slate-300">
+                      Gemini requested tool: <span className="font-mono">{trace.tool_name}</span>
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Route: MCP Gateway -&gt; {trace.server}.{trace.tool_name}
+                    </p>
+                    <p className="text-xs mt-1">
+                      <span className={trace.status === "success" ? "text-emerald-400" : "text-rose-400"}>
+                        Status: {trace.status}
+                      </span>
+                      {" | "}
+                      <span className="text-slate-300">Latency: {trace.latency_ms.toFixed(2)} ms</span>
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}

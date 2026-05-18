@@ -22,6 +22,9 @@ from app.models.schemas import (
     RootCauseAnalysis,
     SKUProfitability,
 )
+from app.mcp_client.audit import record_tool_trace
+from app.mcp_client.gateway import mcp_gateway
+from app.mcp_client.schemas import MCPToolTrace
 from app.services.gemini_service import generate_structured, generate_structured_with_tools
 
 logger = logging.getLogger(__name__)
@@ -140,6 +143,14 @@ class LossMakersResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     skus: list[str] = Field(description="Zarar eden ürünlerin SKU kodları listesi")
+
+
+class AgenticLossMakerResult(BaseModel):
+    """Loss maker detection result with fallback metadata."""
+
+    skus: list[str] = Field(default_factory=list)
+    used_fallback: bool = False
+    error_message: str | None = None
 
 
 class GeminiActionPlan(BaseModel):
@@ -698,27 +709,82 @@ def _fallback_actions(product: SKUProfitability) -> list[ActionCard]:
     return cards
 
 
-async def agentic_detect_loss_makers(run_id: str) -> list[str]:
-    """
-    Agentic AI flow for detecting loss makers.
-    The LLM is provided the detect_loss_makers_tool and must autonomously
-    call it to find the SKUs that are losing money for the given run_id.
-    """
-    from app.mcp_servers.finance_mcp_server import detect_loss_maker_skus_tool
-    
-    prompt = f"Aşağıdaki Run ID için zarar eden ürünleri tespit et: {run_id}. Bunun için detect_loss_maker_skus_tool aracını kullan. Sadece zarar eden SKU'ların kodlarını döndür."
-    
-    system_instruction = "Sen KârGuard AI finansal analiz asistanısın. Gerekli aracı çağırarak analiz yap ve sonucu belirtilen JSON şemasında dön."
-    
+async def agentic_detect_loss_makers(run_id: str) -> AgenticLossMakerResult:
+    """Agentic AI flow for detecting loss makers via MCP Gateway routing."""
+    prompt = (
+        "Aşağıdaki Run ID için zarar eden ürünleri tespit et: "
+        f"{run_id}. Bunun için detect_loss_maker_skus_gateway_tool aracını kullan. "
+        "Sadece zarar eden SKU kodlarını döndür."
+    )
+
+    system_instruction = (
+        "Sen KârGuard AI finansal analiz asistanısın. Gerekli aracı çağırarak "
+        "analiz yap ve sonucu belirtilen JSON şemasında dön."
+    )
+    gateway_call_attempted = False
+
+    async def detect_loss_maker_skus_gateway_tool(
+        run_id: str,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        nonlocal gateway_call_attempted
+        gateway_call_attempted = True
+
+        gateway_result = await mcp_gateway.call_tool(
+            server="finance-mcp",
+            tool_name="detect_loss_maker_skus",
+            arguments={"run_id": run_id, "limit": limit},
+            run_id=run_id,
+            agent_name="Loss Maker Agent",
+            step_name="Loss Maker Detection",
+        )
+
+        if gateway_result.status != "success":
+            raise RuntimeError(gateway_result.error_message or "MCP tool call failed.")
+
+        if not isinstance(gateway_result.result, dict):
+            raise ValueError("MCP tool returned an unexpected payload.")
+
+        return gateway_result.result
+
     try:
         res = await generate_structured_with_tools(
             prompt=prompt,
             response_schema=LossMakersResponse,
-            tools=[detect_loss_maker_skus_tool],
+            tools=[detect_loss_maker_skus_gateway_tool],
             system_instruction=system_instruction,
-            temperature=0.0
+            temperature=0.0,
+            force_any_function=True,
+            allowed_function_names=["detect_loss_maker_skus_gateway_tool"],
         )
-        return res.get("skus", [])
-    except Exception as e:
-        logger.error(f"Agentic loss maker detection failed: {e}")
-        return []
+        return AgenticLossMakerResult(
+            skus=res.get("skus", []),
+            used_fallback=False,
+            error_message=None,
+        )
+    except Exception as exc:
+        logger.error("Agentic loss maker detection failed: %s", exc)
+
+        # If Gemini failed before tool execution, still emit an explicit error trace
+        # so demo audit panels can show fallback reason.
+        if not gateway_call_attempted:
+            record_tool_trace(
+                MCPToolTrace(
+                    run_id=run_id,
+                    agent_name="Loss Maker Agent",
+                    step_name="Loss Maker Detection",
+                    server="finance-mcp",
+                    tool_name="detect_loss_maker_skus",
+                    arguments={"run_id": run_id, "limit": 50},
+                    result=None,
+                    status="error",
+                    latency_ms=0.0,
+                    error_message=f"Gemini function-calling failed: {exc}",
+                )
+            )
+
+        return AgenticLossMakerResult(
+            skus=[],
+            used_fallback=True,
+            error_message=str(exc),
+        )

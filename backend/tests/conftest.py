@@ -16,6 +16,7 @@ os.environ["DEBUG"] = "true"
 from app.api import analyze
 from app.config import settings
 from app.main import app
+from app.mcp_client.audit import clear_tool_traces
 from app.services.action_registry import clear_cache as clear_action_cache
 from app.services.finance_engine import FinanceEngine
 from app.services.storage_service import init_db
@@ -33,12 +34,14 @@ def isolate_state(tmp_path, monkeypatch):
     FinanceEngine._cache.clear()
     analyze._runs.clear()
     analyze._tasks.clear()
+    clear_tool_traces()
     clear_action_cache()
     init_db()
     yield
     FinanceEngine._cache.clear()
     analyze._runs.clear()
     analyze._tasks.clear()
+    clear_tool_traces()
     clear_action_cache()
 
 

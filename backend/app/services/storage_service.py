@@ -93,8 +93,16 @@ def init_db() -> None:
                 FOREIGN KEY (run_id) REFERENCES analysis_runs(run_id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS mcp_tool_traces (
+                trace_id TEXT PRIMARY KEY,
+                run_id TEXT,
+                trace_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_action_cards_run_id ON action_cards(run_id);
             CREATE INDEX IF NOT EXISTS idx_action_cards_run_sku ON action_cards(run_id, sku);
+            CREATE INDEX IF NOT EXISTS idx_mcp_tool_traces_run_id ON mcp_tool_traces(run_id);
             """
         )
 
@@ -341,4 +349,39 @@ def update_action_status(action_id: str, status: ActionStatus) -> ActionCard | N
     card.status = status
     upsert_actions(run_id, [card])
     return card
+
+
+def insert_mcp_tool_trace(
+    *,
+    trace_id: str,
+    run_id: str | None,
+    trace_json: str,
+    created_at: str,
+) -> None:
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO mcp_tool_traces (trace_id, run_id, trace_json, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(trace_id) DO UPDATE SET
+                run_id=excluded.run_id,
+                trace_json=excluded.trace_json,
+                created_at=excluded.created_at
+            """,
+            (trace_id, run_id, trace_json, created_at),
+        )
+
+
+def list_mcp_tool_trace_json(run_id: str) -> list[str]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT trace_json
+            FROM mcp_tool_traces
+            WHERE run_id = ?
+            ORDER BY created_at ASC
+            """,
+            (run_id,),
+        ).fetchall()
+    return [str(row["trace_json"]) for row in rows]
 
