@@ -11,6 +11,7 @@ node_modules/
 .next/
 *.db
 backend/app/data/uploads/
+backend/app/data/qdrant_local/
 *.tsbuildinfo
 .pytest_cache/
 .mypy_cache/
