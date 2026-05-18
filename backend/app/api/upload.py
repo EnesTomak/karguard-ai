@@ -35,7 +35,8 @@ async def upload_files(files: list[UploadFile] = File(...)):
 
     try:
         for file_obj in files:
-            safe_name = Path(file_obj.filename).name.replace("..", "").strip()
+            raw_name = file_obj.filename or ""
+            safe_name = Path(raw_name).name.replace("..", "").strip()
             if not safe_name:
                 raise HTTPException(status_code=400, detail="Gecersiz dosya adi.")
 
