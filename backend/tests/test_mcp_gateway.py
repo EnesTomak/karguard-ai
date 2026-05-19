@@ -171,6 +171,58 @@ async def test_agentic_detect_loss_makers_uses_gateway(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_agentic_detect_loss_makers_schema_error_falls_back_to_direct_gateway(monkeypatch):
+    run_id = "run-schema-fallback"
+    captured: dict[str, object] = {}
+
+    async def fake_generate_structured_with_tools(**_kwargs):
+        raise ValueError(
+            "1 validation error for Schema\n"
+            "additionalProperties\n"
+            "  Extra inputs are not permitted"
+        )
+
+    async def fake_call_tool(
+        server: str,
+        tool_name: str,
+        arguments: dict[str, object],
+        run_id: str | None = None,
+        agent_name: str | None = None,
+        step_name: str | None = None,
+    ) -> MCPToolCallResult:
+        captured["server"] = server
+        captured["tool_name"] = tool_name
+        captured["arguments"] = arguments
+        captured["run_id"] = run_id
+        captured["agent_name"] = agent_name
+        captured["step_name"] = step_name
+        return MCPToolCallResult(
+            run_id=run_id,
+            agent_name=agent_name,
+            step_name=step_name,
+            server=server,
+            tool_name=tool_name,
+            arguments=arguments,
+            result={"run_id": arguments["run_id"], "skus": ["SKU-LOSS", "SKU-2"], "count": 2},
+            status="success",
+            latency_ms=3.1,
+            error_message=None,
+        )
+
+    monkeypatch.setattr("app.services.insight_agent.generate_structured_with_tools", fake_generate_structured_with_tools)
+    monkeypatch.setattr("app.services.insight_agent.mcp_gateway.call_tool", fake_call_tool)
+
+    result = await agentic_detect_loss_makers(run_id)
+    assert result.skus == ["SKU-LOSS", "SKU-2"]
+    assert result.used_fallback is False
+    assert captured["server"] == "finance-mcp"
+    assert captured["tool_name"] == "detect_loss_maker_skus"
+    assert captured["run_id"] == run_id
+    # No synthetic 0ms error trace should be emitted when direct gateway fallback runs.
+    assert get_tool_traces(run_id) == []
+
+
+@pytest.mark.asyncio
 async def test_trace_endpoint_returns_records(client):
     run_id = "trace-api-run"
     record_tool_trace(

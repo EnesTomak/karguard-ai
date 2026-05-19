@@ -153,6 +153,17 @@ class AgenticLossMakerResult(BaseModel):
     error_message: str | None = None
 
 
+def _is_schema_additional_properties_error(exc: Exception) -> bool:
+    """Detect google-genai schema validation failures caused by additionalProperties.
+
+    Some google-genai versions reject JSON Schema fragments containing
+    `additionalProperties`, causing function-calling to fail before any tool call.
+    """
+    message = str(exc)
+    lowered = message.lower()
+    return "validation error for schema" in lowered and "additionalproperties" in lowered
+
+
 class GeminiActionPlan(BaseModel):
     """Schema for Gemini action planning response."""
 
@@ -777,6 +788,34 @@ async def agentic_detect_loss_makers(run_id: str) -> AgenticLossMakerResult:
         )
     except Exception as exc:
         logger.error("Agentic loss maker detection failed: %s", exc)
+
+        # Workaround for google-genai schema validation issues that can fail
+        # before function-calling starts (latency appears as 0.00 ms in UI).
+        if _is_schema_additional_properties_error(exc):
+            logger.warning(
+                "Gemini function-calling schema rejected additionalProperties. "
+                "Falling back to direct MCP Gateway call."
+            )
+            gateway_call_attempted = True
+
+            gateway_result = await mcp_gateway.call_tool(
+                server="finance-mcp",
+                tool_name="detect_loss_maker_skus",
+                arguments={"run_id": run_id, "limit": 50},
+                run_id=run_id,
+                agent_name="Loss Maker Agent",
+                step_name="Loss Maker Detection",
+            )
+
+            if gateway_result.status == "success" and isinstance(gateway_result.result, dict):
+                skus = gateway_result.result.get("skus", [])
+                if isinstance(skus, list):
+                    normalized_skus = [str(sku) for sku in skus if str(sku).strip()]
+                    return AgenticLossMakerResult(
+                        skus=normalized_skus,
+                        used_fallback=False,
+                        error_message=None,
+                    )
 
         # If Gemini failed before tool execution, still emit an explicit error trace
         # so demo audit panels can show fallback reason.
